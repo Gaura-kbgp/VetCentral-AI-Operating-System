@@ -1,0 +1,31 @@
+{
+  "crons": [
+    {
+      "path": "/api/v1/cron/outlook-sync",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/v1/cron/kpi-snapshot",
+      "schedule": "0 2 * * *"
+    },
+    {
+      "path": "/api/v1/cron/renew-subscriptions",
+      "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/v1/cron/cleanup-expired-tokens",
+      "schedule": "0 3 * * 0"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Frame-Options", "value": "DENY" },
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
+        { "key": "Permissions-Policy", "value": "camera=(), microphone=(self), geolocation=()" }
+      ]
+    }
+  ]
+}

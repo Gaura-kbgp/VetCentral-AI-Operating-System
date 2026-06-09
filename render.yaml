@@ -1,0 +1,63 @@
+services:
+  - type: web
+    name: vet-ai-system
+    runtime: node
+    region: ohio          # us-east-ohio — closest to US East
+    plan: standard        # upgrade as needed
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+
+    # ── Environment variables ──────────────────────────────────────
+    # Set secret values in the Render dashboard (not here).
+    # This file only declares which vars are required.
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+      - key: NODE_OPTIONS
+        value: "--max-old-space-size=2048"
+
+      # Supabase
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+
+      # AI
+      - key: REPLICATE_API_TOKEN
+        sync: false
+      - key: AI_ASSISTANT_PROVIDER
+        value: replicate
+      - key: AI_ASSISTANT_MODEL
+        value: meta/meta-llama-3-70b-instruct
+
+      # App URL (update after first deploy)
+      - key: NEXT_PUBLIC_APP_URL
+        sync: false
+
+      # Email
+      - key: RESEND_API_KEY
+        sync: false
+
+      # Security
+      - key: TOKEN_ENCRYPTION_KEY
+        sync: false
+      - key: CRON_SECRET
+        sync: false
+
+      # Microsoft 365 (optional)
+      - key: MICROSOFT_CLIENT_ID
+        sync: false
+      - key: MICROSOFT_CLIENT_SECRET
+        sync: false
+      - key: MICROSOFT_TENANT_ID
+        sync: false
+      - key: MICROSOFT_REDIRECT_URI
+        sync: false
+      - key: OUTLOOK_WEBHOOK_SECRET
+        sync: false
