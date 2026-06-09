@@ -1,5 +1,5 @@
 import { inflateRawSync } from 'zlib';
-import { PDFParse } from 'pdf-parse';
+import pdfParse from 'pdf-parse';
 import Replicate from 'replicate';
 
 export type SupportedFileType =
@@ -143,10 +143,7 @@ function extractXlsxText(entries: Map<string, Buffer>): string {
 // ── PDF via pdf-parse ────────────────────────────────────────────
 
 async function extractPdfText(buf: Buffer): Promise<string> {
-  const parser = new PDFParse({ data: buf });
-  await parser.load();
-  const result = await parser.getText();
-  await parser.destroy();
+  const result = await pdfParse(buf);
   return result.text;
 }
 
