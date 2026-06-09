@@ -1270,6 +1270,7 @@ export async function createMeetingWithCalendarEvent(
         color:        null,
         is_recurring: false,
         recurrence_rule: null,
+        attendees:    [],
       });
       if (calRes.success) {
         const adminClient = createSupabaseAdminClient();
