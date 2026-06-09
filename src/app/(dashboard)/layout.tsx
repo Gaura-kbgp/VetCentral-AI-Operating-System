@@ -78,11 +78,15 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // ── Onboarding gate ─────────────────────────────────────────────────────────
   // If the user has an active (non-completed) onboarding record, keep them on
   // their onboarding journey until HR/manager marks it complete.
+  // Admins are exempt — they manage onboarding and must access the dashboard freely.
+  const ADMIN_EXEMPT_ROLES: AppRole[] = ['super_admin', 'org_admin', 'hospital_admin', 'practice_manager', 'hr'];
+  const isAdminExempt = highestRole != null && ADMIN_EXEMPT_ROLES.includes(highestRole);
+
   const headersList = await headers();
   const pathname    = headersList.get('x-pathname') ?? '';
   const onOnboarding = pathname.startsWith('/onboarding');
 
-  if (!onOnboarding) {
+  if (!onOnboarding && !isAdminExempt) {
     const { data: activeRecord } = await adminClient
       .from('onboarding_records')
       .select('id')
