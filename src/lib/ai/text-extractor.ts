@@ -158,7 +158,7 @@ async function extractImageText(buf: Buffer, mimeType: string): Promise<string> 
   const safe = validMimes.includes(mimeType) ? mimeType : 'image/jpeg';
 
   const output = await replicate.run(
-    process.env.AI_ASSISTANT_MODEL ?? 'meta/meta-llama-3-70b-instruct',
+    (process.env.AI_ASSISTANT_MODEL ?? 'meta/meta-llama-3-70b-instruct') as `${string}/${string}`,
     {
       input: {
         image: `data:${safe};base64,${buf.toString('base64')}`,

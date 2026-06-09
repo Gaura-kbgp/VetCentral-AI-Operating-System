@@ -4,7 +4,7 @@ import { createSupabaseAdminClient } from '@/lib/supabase/server';
 const replicate = new Replicate({ auth: process.env.REPLICATE_API_TOKEN! });
 
 const EMBED_MODEL = 'nateraw/jina-embeddings-v2-base-en';
-const CHAT_MODEL  = process.env.AI_ASSISTANT_MODEL ?? 'meta/meta-llama-3-70b-instruct';
+const CHAT_MODEL  = (process.env.AI_ASSISTANT_MODEL ?? 'meta/meta-llama-3-70b-instruct') as `${string}/${string}`;
 
 interface RAGContext {
   userId: string;

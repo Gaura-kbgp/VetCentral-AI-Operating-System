@@ -62,7 +62,7 @@ Keep answers under 200 words unless a list requires more.`;
     const prompt = `Calendar data (next 90 days):\n${eventsContext || 'No events found.'}\n\nQuestion: ${query}\n\nAnswer:`;
 
     const output = await replicate.run(
-      process.env.AI_ASSISTANT_MODEL ?? 'meta/meta-llama-3-70b-instruct',
+      (process.env.AI_ASSISTANT_MODEL ?? 'meta/meta-llama-3-70b-instruct') as `${string}/${string}`,
       {
         input: {
           prompt,
