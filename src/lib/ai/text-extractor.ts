@@ -1,5 +1,6 @@
 import { inflateRawSync } from 'zlib';
-import pdfParse from 'pdf-parse';
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const pdfParse = require('pdf-parse') as (buf: Buffer) => Promise<{ text: string }>;
 import Replicate from 'replicate';
 
 export type SupportedFileType =

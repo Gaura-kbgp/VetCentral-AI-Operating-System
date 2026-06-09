@@ -6,6 +6,8 @@ const nextConfig: NextConfig = {
       { protocol: "https", hostname: "*.supabase.co" },
     ],
   },
+  // pdf-parse ESM build exposes raw PDF.js internals — keep it as CJS at runtime
+  serverExternalPackages: ['pdf-parse'],
   // Raise Turbopack's internal memory limit to match the Node heap increase
   experimental: {
     turbopackMemoryLimit: 3 * 1024 * 1024 * 1024, // 3 GB
