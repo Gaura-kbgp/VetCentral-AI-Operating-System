@@ -852,7 +852,7 @@ export async function getRecentlyCompleted(limit = 20): Promise<ActionResult<Req
 // Approvals Center Data (admin-only, uses admin client)
 // ─────────────────────────────────────────────────────────────
 
-export interface ApprovalRow extends RequestSummary {
+export interface ApprovalRow extends Omit<RequestSummary, 'requester'> {
   requester: { first_name: string | null; last_name: string | null; email: string | null; avatar_url: string | null } | null;
 }
 
