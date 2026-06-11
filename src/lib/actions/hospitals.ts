@@ -188,15 +188,17 @@ export async function deleteHospital(id: string): Promise<ActionResult> {
 
   if (error) return { success: false, error: error.message };
 
-  await adminClient.from('audit_logs').insert({
-    org_id:        orgId,
-    user_id:       user.id,
-    action:        'delete',
-    resource_type: 'hospital',
-    resource_id:   id,
-    old_data:      hospital,
-    new_data:      null,
-  }).catch(() => {});
+  try {
+    await adminClient.from('audit_logs').insert({
+      org_id:        orgId,
+      user_id:       user.id,
+      action:        'delete',
+      resource_type: 'hospital',
+      resource_id:   id,
+      old_data:      hospital,
+      new_data:      null,
+    });
+  } catch { /* audit log failure is non-fatal */ }
 
   revalidatePath('/admin/hospitals');
   return { success: true, data: {} };
