@@ -50,6 +50,7 @@ import {
   ClipboardCheck,
 } from 'lucide-react';
 import { hasPermission } from '@/lib/permissions';
+import { useSPANavigation, HREF_TO_SECTION } from '@/contexts/spa-navigation';
 import type { AppRole } from '@/types/database';
 
 export interface AccountMenuProfile {
@@ -99,6 +100,7 @@ const ROLE_COLORS: Record<AppRole, string> = {
 export default function AccountMenu({ profile, role, unreadCount = 0 }: AccountMenuProps) {
   const router = useRouter();
   const supabase = createSupabaseBrowserClient();
+  const { navigate } = useSPANavigation();
   const [showSignOutDialog, setShowSignOutDialog] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
 
@@ -131,7 +133,9 @@ export default function AccountMenu({ profile, role, unreadCount = 0 }: AccountM
   }
 
   function nav(path: string) {
-    router.push(path);
+    const section = HREF_TO_SECTION[path];
+    if (section) navigate(section);
+    else router.push(path);
   }
 
   return (

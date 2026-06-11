@@ -1,663 +1,592 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
-import Link from 'next/link';
+import React, { useState, useTransition } from 'react';
 import {
-  Building2, Users, Layers, FolderOpen, Calendar, GraduationCap,
-  ClipboardList, MapPin, Phone, Clock, Search, ShieldCheck,
-  AlertCircle, CheckCircle2, Activity, Sparkles, ArrowUpRight,
-  MessageSquare, FileText, Star, BarChart3, TrendingUp,
-  TrendingDown, ChevronRight, Zap, Bell, RefreshCw, Shield,
-  LayoutGrid, Globe, Award,
+  Building2, Users, FileText, FolderOpen, Layers,
+  ClipboardList, GraduationCap, MapPin, Phone, Globe,
+  ChevronRight, Bell, BellPlus, X, AlertTriangle,
+  BookOpen, ExternalLink, Search, Pencil, Plus,
+  Trash2, Save, Check,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { createSupabaseBrowserClient } from '@/lib/supabase/client';
-import type {
-  OrgOverview, HospitalCard, CrossHospitalEvent, ViewRole,
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useAppStore } from '@/store/app-store';
+import {
+  getHospitalWorkspaceData,
+  createHospitalAnnouncement,
 } from '@/lib/actions/hospital-hub';
+import {
+  updateHospital,
+  createHospital,
+  deleteHospital,
+} from '@/lib/actions/hospitals';
+import type {
+  HospitalCard, ViewRole,
+  HospitalAnnouncement, WorkspaceResource,
+} from '@/lib/actions/hospital-hub';
+import type { SectionKey } from '@/types/sections';
+import { PageHeader } from '@/components/ui/page-header';
 
 // ─────────────────────────────────────────────────────────────
-// Pure helpers
+// Constants
 // ─────────────────────────────────────────────────────────────
 
-function healthScore(c: HospitalCard): number {
-  const compliance = c.complianceRate;
-  const training   = Math.max(0, 100 - c.trainingDueCount * 15);
-  const requests   = Math.max(0, 100 - c.openRequests * 8);
-  const activity   = Math.min(100, c.eventsThisWeek * 20);
-  return Math.round(compliance * 0.40 + training * 0.25 + requests * 0.20 + activity * 0.15);
-}
+const POSTER_ROLES = ['super_admin', 'org_admin', 'hospital_admin', 'practice_manager', 'hr'];
 
-function fmtDate(iso: string) {
-  return new Date(iso).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-}
-function fmtTime(iso: string) {
-  return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
-}
+const PRIORITY_CONFIG = {
+  urgent: { label: 'Urgent', dot: 'bg-red-500',   badge: 'text-red-700 bg-red-50 border-red-200'         },
+  high:   { label: 'High',   dot: 'bg-orange-400', badge: 'text-orange-700 bg-orange-50 border-orange-200' },
+  normal: { label: 'Normal', dot: 'bg-slate-300',  badge: 'text-slate-600 bg-slate-50 border-slate-200'    },
+} as const;
 
-const ROLE_LABELS: Record<string, string> = {
-  super_admin: 'Super Admin', org_admin: 'Org Admin',
-  hospital_admin: 'Admin', practice_manager: 'Manager',
-  doctor: 'Doctor', csr: 'CSR', va: 'VA', hr: 'HR',
-  marketing: 'Marketing', it_admin: 'IT', viewer: 'Viewer',
-  executive: 'Executive',
+const CATEGORY_ICONS: Record<string, React.ElementType> = {
+  FileText, BookOpen, FolderOpen, Layers, GraduationCap, Users,
+  Shield: Layers, Settings: Layers,
 };
 
+const PRESET_COLORS = [
+  '#2563EB', '#7C3AED', '#059669', '#DC2626',
+  '#D97706', '#0891B2', '#6B7280', '#1e3a5f',
+];
+
+function relativeTime(iso: string) {
+  const diff  = Date.now() - new Date(iso).getTime();
+  const mins  = Math.floor(diff / 60000);
+  const hours = Math.floor(mins / 60);
+  const days  = Math.floor(hours / 24);
+  if (mins < 1)   return 'Just now';
+  if (mins < 60)  return `${mins}m ago`;
+  if (hours < 24) return `${hours}h ago`;
+  if (days < 7)   return `${days}d ago`;
+  return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
 // ─────────────────────────────────────────────────────────────
-// Health Score Ring
+// Hospital Selector  (3 equal-width horizontal tiles)
 // ─────────────────────────────────────────────────────────────
 
-function HealthRing({ score }: { score: number }) {
-  const r = 18;
-  const circ = 2 * Math.PI * r;
-  const offset = circ - (score / 100) * circ;
-  const color = score >= 80 ? '#22c55e' : score >= 60 ? '#f59e0b' : '#ef4444';
+function HospitalSelector({
+  hospitals, selectedId, onSelect, isSuperAdmin, onAddNew,
+}: {
+  hospitals: HospitalCard[];
+  selectedId: string;
+  onSelect: (id: string) => void;
+  isSuperAdmin: boolean;
+  onAddNew: () => void;
+}) {
   return (
-    <div className="relative h-12 w-12 shrink-0">
-      <svg className="h-12 w-12 -rotate-90" viewBox="0 0 44 44">
-        <circle cx="22" cy="22" r={r} strokeWidth="3.5" fill="none" stroke="#f1f5f9" />
-        <circle
-          cx="22" cy="22" r={r} strokeWidth="3.5" fill="none"
-          stroke={color}
-          strokeDasharray={circ}
-          strokeDashoffset={offset}
-          strokeLinecap="round"
+    <div className="flex items-stretch gap-3">
+      {hospitals.map(h => {
+        const active = selectedId === h.id;
+        const color  = h.color ?? '#2563EB';
+        return (
+          <button
+            key={h.id}
+            onClick={() => onSelect(h.id)}
+            className={cn(
+              'relative group flex flex-col items-start gap-2 px-4 py-4 rounded-xl border transition-all duration-150 text-left overflow-hidden flex-1',
+              active ? 'bg-white shadow-md' : 'bg-white border-slate-200 hover:border-slate-300 hover:shadow-sm',
+            )}
+            style={active ? { borderColor: color } : {}}
+          >
+            {/* Top color bar */}
+            <div
+              className="absolute inset-x-0 top-0 h-[3px]"
+              style={{ backgroundColor: color, opacity: active ? 1 : 0.2 }}
+            />
+            <div
+              className="h-9 w-9 rounded-xl flex items-center justify-center shrink-0"
+              style={{ backgroundColor: active ? `${color}18` : '#f1f5f9' }}
+            >
+              <Building2 className="h-[18px] w-[18px]" style={{ color: active ? color : '#94a3b8' }} />
+            </div>
+            <div className="min-w-0 w-full">
+              <p
+                className={cn('text-[13px] font-semibold leading-snug', active ? 'text-slate-900' : 'text-slate-600 group-hover:text-slate-900')}
+                style={active ? { color } : {}}
+              >
+                {h.name}
+              </p>
+              {h.address && (
+                <p className="text-[11px] text-slate-400 mt-0.5 truncate">{h.address.split(',').slice(0, 2).join(',')}</p>
+              )}
+            </div>
+          </button>
+        );
+      })}
+
+      {/* Add Hospital button — super_admin only */}
+      {isSuperAdmin && (
+        <button
+          onClick={onAddNew}
+          className="flex flex-col items-center justify-center gap-1.5 px-5 py-4 rounded-xl border-2 border-dashed border-slate-200 hover:border-[#1e3a5f] hover:bg-slate-50 text-slate-400 hover:text-[#1e3a5f] transition-all group shrink-0"
+        >
+          <Plus className="h-5 w-5" />
+          <span className="text-[11px] font-semibold whitespace-nowrap">Add Hospital</span>
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Hospital Form (shared for add + edit)
+// ─────────────────────────────────────────────────────────────
+
+interface HospitalFormData {
+  name: string;
+  address: string;
+  phone: string;
+  email: string;
+  website: string;
+  description: string;
+  color: string;
+}
+
+function HospitalForm({
+  initial,
+  onSave,
+  onCancel,
+  onDelete,
+  isNew,
+}: {
+  initial: HospitalFormData;
+  onSave: (data: HospitalFormData) => Promise<void>;
+  onCancel: () => void;
+  onDelete?: () => Promise<void>;
+  isNew?: boolean;
+}) {
+  const [form,    setForm]    = useState<HospitalFormData>(initial);
+  const [error,   setError]   = useState('');
+  const [confirm, setConfirm] = useState(false);
+  const [saving,  startSave]  = useTransition();
+  const [deleting, startDel]  = useTransition();
+
+  function field(key: keyof HospitalFormData) {
+    return {
+      value: form[key],
+      onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+        setForm(f => ({ ...f, [key]: e.target.value })),
+    };
+  }
+
+  const inputCls = 'w-full h-9 px-3 text-[13px] border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-200';
+  const labelCls = 'block text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1';
+
+  return (
+    <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-[14px] font-bold text-slate-800">{isNew ? 'Add New Hospital' : 'Edit Hospital'}</p>
+        <button onClick={onCancel} className="h-7 w-7 flex items-center justify-center rounded-lg hover:bg-slate-200 text-slate-400 transition-colors">
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+
+      {/* Name + Color */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="sm:col-span-2">
+          <label className={labelCls}>Hospital Name *</label>
+          <input {...field('name')} placeholder="e.g. Riverside Animal Hospital" className={inputCls} />
+        </div>
+        <div>
+          <label className={labelCls}>Brand Color</label>
+          <div className="flex items-center gap-2 flex-wrap">
+            {PRESET_COLORS.map(c => (
+              <button
+                key={c}
+                type="button"
+                onClick={() => setForm(f => ({ ...f, color: c }))}
+                className={cn('h-7 w-7 rounded-lg border-2 transition-all', form.color === c ? 'border-slate-700 scale-110' : 'border-transparent hover:scale-105')}
+                style={{ backgroundColor: c }}
+              />
+            ))}
+            <input
+              type="color"
+              value={form.color}
+              onChange={e => setForm(f => ({ ...f, color: e.target.value }))}
+              className="h-7 w-7 rounded-lg border border-slate-200 cursor-pointer"
+              title="Custom color"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Address + Phone */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <label className={labelCls}>Address</label>
+          <input {...field('address')} placeholder="123 Main St, City, State ZIP" className={inputCls} />
+        </div>
+        <div>
+          <label className={labelCls}>Phone</label>
+          <input {...field('phone')} placeholder="(703) 555-0100" className={inputCls} />
+        </div>
+      </div>
+
+      {/* Email + Website */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <label className={labelCls}>Email</label>
+          <input {...field('email')} placeholder="info@hospital.com" className={inputCls} />
+        </div>
+        <div>
+          <label className={labelCls}>Website</label>
+          <input {...field('website')} placeholder="https://hospital.com" className={inputCls} />
+        </div>
+      </div>
+
+      {/* Description */}
+      <div>
+        <label className={labelCls}>Description</label>
+        <textarea
+          {...field('description')}
+          placeholder="Brief description of this hospital…"
+          rows={2}
+          className="w-full px-3 py-2 text-[13px] border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-200 resize-none"
         />
-      </svg>
-      <div className="absolute inset-0 flex items-center justify-center">
-        <p className="text-[11px] font-bold text-gray-900">{score}</p>
+      </div>
+
+      {error && <p className="text-[12px] text-red-600 bg-red-50 px-3 py-2 rounded-lg border border-red-200">{error}</p>}
+
+      {/* Action buttons */}
+      <div className="flex items-center gap-3 pt-1">
+        {/* Delete (edit mode only) */}
+        {onDelete && !isNew && (
+          confirm ? (
+            <div className="flex items-center gap-2">
+              <p className="text-[12px] text-red-600 font-medium">Delete permanently?</p>
+              <button
+                type="button"
+                disabled={deleting}
+                onClick={() => startDel(async () => {
+                  setError('');
+                  await onDelete();
+                })}
+                className="h-8 px-3 text-[12px] font-semibold text-white bg-red-600 hover:bg-red-700 rounded-lg disabled:opacity-50 transition-colors"
+              >
+                {deleting ? 'Deleting…' : 'Yes, Delete'}
+              </button>
+              <button type="button" onClick={() => setConfirm(false)} className="h-8 px-3 text-[12px] font-medium text-slate-600 hover:bg-slate-200 rounded-lg transition-colors">
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirm(true)}
+              className="flex items-center gap-1.5 h-8 px-3 text-[12px] font-medium text-red-600 hover:bg-red-50 border border-red-200 rounded-lg transition-colors"
+            >
+              <Trash2 className="h-3.5 w-3.5" />Delete Hospital
+            </button>
+          )
+        )}
+        <div className="flex items-center gap-2 ml-auto">
+          <button type="button" onClick={onCancel} className="h-8 px-4 text-[12px] font-medium text-slate-600 hover:bg-slate-200 rounded-lg transition-colors">
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => {
+              if (!form.name.trim()) { setError('Hospital name is required'); return; }
+              setError('');
+              startSave(async () => {
+                try { await onSave(form); }
+                catch (e: any) { setError(e?.message ?? 'Save failed'); }
+              });
+            }}
+            className="flex items-center gap-1.5 h-8 px-4 text-[12px] font-semibold text-white bg-[#1e3a5f] hover:bg-[#162e4d] rounded-lg disabled:opacity-50 transition-colors"
+          >
+            <Save className="h-3.5 w-3.5" />{saving ? 'Saving…' : 'Save Changes'}
+          </button>
+        </div>
       </div>
     </div>
   );
 }
 
 // ─────────────────────────────────────────────────────────────
-// Compliance Badge
+// Hospital Info header (with edit for super_admin)
 // ─────────────────────────────────────────────────────────────
 
-function ComplianceBadge({ rate }: { rate: number }) {
-  const cls = rate >= 90
-    ? 'text-green-700 bg-green-50 border-green-200'
-    : rate >= 70
-      ? 'text-amber-700 bg-amber-50 border-amber-200'
-      : 'text-red-700 bg-red-50 border-red-200';
-  const Icon = rate >= 90 ? CheckCircle2 : AlertCircle;
-  return (
-    <span className={cn('inline-flex items-center gap-1 text-[10px] font-bold border rounded-full px-2 py-0.5', cls)}>
-      <Icon className="h-3 w-3" />{rate}%
-    </span>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────
-// Org KPI bar
-// ─────────────────────────────────────────────────────────────
-
-function KPIBar({ overview, cards }: { overview: OrgOverview; cards: HospitalCard[] }) {
-  const avgCompliance = cards.length
-    ? Math.round(cards.reduce((s, c) => s + c.complianceRate, 0) / cards.length)
-    : 0;
-
-  const tiles = [
-    { icon: Building2,    val: overview.totalHospitals,    label: 'Hospitals',      highlight: false },
-    { icon: Users,        val: overview.totalEmployees,    label: 'Employees',      highlight: false },
-    { icon: Layers,       val: overview.totalDepartments,  label: 'Departments',    highlight: false },
-    { icon: FolderOpen,   val: overview.openTasks,         label: 'Open Tasks',     highlight: overview.openTasks > 0 },
-    { icon: Calendar,     val: overview.upcomingEvents,    label: 'Events (7d)',    highlight: false },
-    { icon: GraduationCap,val: overview.trainingDue,       label: 'Training Due',   highlight: overview.trainingDue > 0 },
-    { icon: Shield,       val: `${avgCompliance}%`,        label: 'Avg Compliance', highlight: avgCompliance < 80 },
-  ];
-
-  return (
-    <div className="flex gap-2 overflow-x-auto pb-1">
-      {tiles.map(t => (
-        <div
-          key={t.label}
-          className={cn(
-            'flex flex-col items-center justify-center px-4 py-3 rounded-xl min-w-22.5 flex-1 border',
-            t.highlight
-              ? 'bg-red-500/15 border-red-400/30 text-red-200'
-              : 'bg-white/10 border-white/10 text-white',
-          )}
-        >
-          <t.icon className={cn('h-4 w-4 mb-1', t.highlight ? 'text-red-300' : 'text-slate-300')} />
-          <p className="text-[20px] font-bold leading-none">{t.val}</p>
-          <p className="text-[10px] mt-0.5 opacity-70 text-center leading-tight">{t.label}</p>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────
-// Hospital Switcher
-// ─────────────────────────────────────────────────────────────
-
-function HospitalSwitcher({
-  cards, selected, onSelect, myHospitalIds, viewRole,
+function HospitalInfoHeader({
+  hospital, isSuperAdmin, onSaved, onDeleted,
 }: {
-  cards: HospitalCard[];
-  selected: string | null;
-  onSelect: (id: string | null) => void;
-  myHospitalIds: string[];
-  viewRole: ViewRole;
+  hospital: HospitalCard;
+  isSuperAdmin: boolean;
+  onSaved: () => void;
+  onDeleted: () => void;
 }) {
-  const mySet = new Set(myHospitalIds);
-  const visible = viewRole === 'executive' ? cards : cards.filter(c => mySet.has(c.id));
+  const [editing, setEditing] = useState(false);
+  const color = hospital.color ?? '#2563EB';
 
-  if (visible.length <= 1) return null;
+  async function handleSave(form: HospitalFormData) {
+    const res = await updateHospital(hospital.id, form);
+    if (!res.success) throw new Error((res as any).error ?? 'Update failed');
+    onSaved();
+    setEditing(false);
+  }
 
-  return (
-    <div className="flex items-center gap-2 bg-white border border-gray-100 rounded-2xl p-1.5 shadow-sm overflow-x-auto">
-      {viewRole === 'executive' && (
-        <button
-          onClick={() => onSelect(null)}
-          className={cn(
-            'flex items-center gap-1.5 h-8 px-3 rounded-xl text-[12px] font-medium whitespace-nowrap transition-all',
-            selected === null
-              ? 'bg-slate-900 text-white shadow-sm'
-              : 'text-gray-500 hover:text-gray-800 hover:bg-gray-100',
-          )}
-        >
-          <LayoutGrid className="h-3.5 w-3.5" /> All Hospitals
-        </button>
-      )}
-      {visible.map(c => (
-        <button
-          key={c.id}
-          onClick={() => onSelect(c.id)}
-          className={cn(
-            'flex items-center gap-1.5 h-8 px-3 rounded-xl text-[12px] font-medium whitespace-nowrap transition-all',
-            selected === c.id
-              ? 'text-white shadow-sm'
-              : 'text-gray-500 hover:text-gray-800 hover:bg-gray-100',
-          )}
-          style={selected === c.id ? { backgroundColor: c.color ?? '#1e293b' } : {}}
-        >
-          <div
-            className={cn('h-2 w-2 rounded-full shrink-0', selected === c.id ? 'bg-white/60' : '')}
-            style={selected !== c.id ? { backgroundColor: c.color ?? '#94a3b8' } : {}}
-          />
-          {c.name}
-          {mySet.has(c.id) && viewRole === 'executive' && (
-            <Star className="h-3 w-3 ml-0.5 opacity-60" />
-          )}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────
-// Hospital Card (redesigned)
-// ─────────────────────────────────────────────────────────────
-
-const QUICK_ACTIONS = [
-  { key: 'calendar',      label: 'Calendar',      icon: Calendar,      href: (id: string) => `/calendar?hospital=${id}` },
-  { key: 'employees',     label: 'Employees',     icon: Users,         href: (id: string) => `/hospital/${id}?tab=employees` },
-  { key: 'training',      label: 'Training',      icon: GraduationCap, href: (_id: string) => `/training` },
-  { key: 'documents',     label: 'Documents',     icon: FileText,      href: (id: string) => `/hospital/${id}?tab=documents` },
-  { key: 'analytics',     label: 'Analytics',     icon: BarChart3,     href: (id: string) => `/hospital/${id}?tab=analytics` },
-  { key: 'communication', label: 'Comms',          icon: MessageSquare, href: (_id: string) => `/communication` },
-];
-
-function HospCard({ card, isMine }: { card: HospitalCard; isMine: boolean }) {
-  const score = healthScore(card);
-  const color = card.color ?? '#2563EB';
-  const hasAlert = card.trainingDueCount > 0 || card.openRequests > 2 || card.complianceRate < 70;
+  async function handleDelete() {
+    const res = await deleteHospital(hospital.id);
+    if (!res.success) throw new Error((res as any).error ?? 'Delete failed');
+    onDeleted();
+  }
 
   return (
-    <div className={cn(
-      'bg-white rounded-2xl border shadow-sm overflow-hidden flex flex-col group hover:shadow-md transition-all duration-200',
-      isMine ? 'border-blue-200 ring-1 ring-blue-100' : 'border-gray-100',
-      hasAlert ? 'ring-1 ring-red-100' : '',
-    )}>
-      <div className="h-1.5 w-full" style={{ background: `linear-gradient(90deg, ${color}, ${color}99)` }} />
-
-      <div className="p-5 flex flex-col gap-4 flex-1">
-        {/* Header row */}
-        <div className="flex items-start gap-3">
-          <div
-            className="h-11 w-11 rounded-xl flex items-center justify-center shrink-0"
-            style={{ backgroundColor: `${color}18`, border: `1.5px solid ${color}25` }}
-          >
+    <div className="space-y-3">
+      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+        <div className="h-[3px]" style={{ backgroundColor: color }} />
+        <div className="flex items-start gap-4 px-5 py-4">
+          <div className="h-11 w-11 rounded-xl flex items-center justify-center shrink-0" style={{ backgroundColor: `${color}15` }}>
             <Building2 className="h-5 w-5" style={{ color }} />
           </div>
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <h3 className="text-[14px] font-bold text-gray-900 leading-tight">{card.name}</h3>
-              {isMine && (
-                <span className="inline-flex items-center gap-0.5 text-[9px] font-bold uppercase tracking-wider bg-blue-500 text-white rounded-full px-1.5 py-0.5">
-                  <Star className="h-2.5 w-2.5" /> Mine
+            <h2 className="text-[15px] font-bold text-slate-900 leading-snug">{hospital.name}</h2>
+            <div className="flex items-center gap-5 mt-1.5 flex-wrap">
+              {hospital.address && (
+                <span className="flex items-center gap-1.5 text-[12px] text-slate-500">
+                  <MapPin className="h-3.5 w-3.5 shrink-0 text-slate-400" />{hospital.address}
                 </span>
               )}
-              {hasAlert && (
-                <span className="inline-flex items-center gap-0.5 text-[9px] font-bold uppercase tracking-wider bg-red-500 text-white rounded-full px-1.5 py-0.5">
-                  <AlertCircle className="h-2.5 w-2.5" /> Alert
-                </span>
+              {hospital.phone && (
+                <a href={`tel:${hospital.phone}`} className="flex items-center gap-1.5 text-[12px] text-slate-500 hover:text-slate-800 transition-colors">
+                  <Phone className="h-3.5 w-3.5 shrink-0 text-slate-400" />{hospital.phone}
+                </a>
+              )}
+              {hospital.website && (
+                <a href={hospital.website} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-[12px] text-slate-500 hover:text-slate-800 transition-colors">
+                  <Globe className="h-3.5 w-3.5 shrink-0 text-slate-400" />Website <ExternalLink className="h-3 w-3" />
+                </a>
               )}
             </div>
-            {card.address && (
-              <p className="text-[10px] text-gray-400 mt-0.5 flex items-center gap-1 truncate">
-                <MapPin className="h-3 w-3 shrink-0" />{card.address}
-              </p>
+            {hospital.description && (
+              <p className="text-[12px] text-slate-400 mt-1.5 leading-relaxed">{hospital.description}</p>
             )}
           </div>
-          <Link
-            href={`/hospital/${card.id}`}
-            className="h-8 w-8 rounded-xl bg-gray-50 hover:bg-orange-50 border border-gray-100 hover:border-orange-200 flex items-center justify-center transition-all opacity-0 group-hover:opacity-100 shrink-0"
-          >
-            <ArrowUpRight className="h-4 w-4 text-gray-400 group-hover:text-orange-500" />
-          </Link>
-        </div>
-
-        {/* Health score + compliance row */}
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            <HealthRing score={score} />
-            <div>
-              <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400">Health</p>
-              <p className="text-[11px] text-gray-500">
-                {score >= 80 ? 'Excellent' : score >= 60 ? 'Fair' : 'Needs Attention'}
-              </p>
-            </div>
-          </div>
-          <div className="flex-1 space-y-1">
-            <div className="flex items-center justify-between">
-              <p className="text-[10px] font-semibold text-gray-500">Compliance</p>
-              <ComplianceBadge rate={card.complianceRate} />
-            </div>
-            <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
-              <div
-                className={cn('h-full rounded-full transition-all', card.complianceRate >= 90 ? 'bg-green-400' : card.complianceRate >= 70 ? 'bg-amber-400' : 'bg-red-400')}
-                style={{ width: `${card.complianceRate}%` }}
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Stats grid */}
-        <div className="grid grid-cols-3 gap-1.5">
-          {[
-            { icon: Users,         val: card.staffCount,       label: 'Employees',  alert: false                          },
-            { icon: Layers,        val: card.departmentCount,  label: 'Depts',      alert: false                          },
-            { icon: FolderOpen,    val: card.openRequests,     label: 'Requests',   alert: card.openRequests > 0          },
-            { icon: GraduationCap, val: card.trainingDueCount, label: 'Training Due',alert: card.trainingDueCount > 0     },
-            { icon: Calendar,      val: card.eventsThisWeek,   label: 'Events',     alert: false                          },
-            { icon: Award,         val: `${card.complianceRate}%`, label: 'Compliant', alert: card.complianceRate < 70   },
-          ].map(s => (
-            <div
-              key={s.label}
-              className={cn('flex flex-col items-center py-2 px-1.5 rounded-xl', s.alert ? 'bg-red-50' : 'bg-gray-50')}
+          {isSuperAdmin && !editing && (
+            <button
+              onClick={() => setEditing(true)}
+              className="flex items-center gap-1.5 h-8 px-3 text-[12px] font-medium text-slate-500 hover:text-[#1e3a5f] border border-slate-200 hover:border-[#1e3a5f] rounded-lg transition-colors shrink-0"
             >
-              <s.icon className={cn('h-3.5 w-3.5 mb-0.5', s.alert ? 'text-red-500' : 'text-gray-400')} />
-              <p className={cn('text-[13px] font-bold leading-none', s.alert ? 'text-red-600' : 'text-gray-800')}>{s.val}</p>
-              <p className="text-[9px] text-gray-400 mt-0.5 text-center leading-tight">{s.label}</p>
-            </div>
-          ))}
-        </div>
-
-        {/* Contact row */}
-        {(card.phone || card.timezone) && (
-          <div className="flex items-center gap-3 text-[11px] text-gray-400">
-            {card.phone && (
-              <a href={`tel:${card.phone}`} className="flex items-center gap-1 hover:text-gray-600">
-                <Phone className="h-3 w-3" />{card.phone}
-              </a>
-            )}
-            {card.timezone && (
-              <span className="flex items-center gap-1">
-                <Clock className="h-3 w-3" />{card.timezone.split('/').pop()?.replace('_', ' ')}
-              </span>
-            )}
-          </div>
-        )}
-
-        {/* Quick actions */}
-        <div className="flex items-center gap-1.5 mt-auto pt-3 border-t border-gray-50 flex-wrap">
-          {QUICK_ACTIONS.map(qa => (
-            <Link
-              key={qa.key}
-              href={qa.href(card.id)}
-              className="flex items-center gap-1 h-7 px-2.5 rounded-lg text-[11px] font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-800 border border-transparent hover:border-gray-200 transition-colors"
-            >
-              <qa.icon className="h-3.5 w-3.5" />{qa.label}
-            </Link>
-          ))}
+              <Pencil className="h-3.5 w-3.5" />Edit
+            </button>
+          )}
         </div>
       </div>
+
+      {/* Inline edit form */}
+      {editing && (
+        <HospitalForm
+          initial={{
+            name:        hospital.name,
+            address:     hospital.address      ?? '',
+            phone:       hospital.phone        ?? '',
+            email:       hospital.email        ?? '',
+            website:     hospital.website      ?? '',
+            description: hospital.description  ?? '',
+            color:       hospital.color        ?? '#2563EB',
+          }}
+          onSave={handleSave}
+          onCancel={() => setEditing(false)}
+          onDelete={handleDelete}
+        />
+      )}
     </div>
   );
 }
 
 // ─────────────────────────────────────────────────────────────
-// Executive Comparison Dashboard
+// Add Hospital panel (super_admin only)
 // ─────────────────────────────────────────────────────────────
 
-type SortKey = 'name' | 'staffCount' | 'complianceRate' | 'healthScore' | 'openRequests' | 'trainingDueCount';
-
-function ExecutiveComparison({ cards }: { cards: HospitalCard[] }) {
-  const [sortKey, setSortKey] = useState<SortKey>('healthScore');
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
-
-  function toggleSort(key: SortKey) {
-    if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
-    else { setSortKey(key); setSortDir('desc'); }
+function AddHospitalPanel({
+  orgId,
+  onCreated,
+  onCancel,
+}: {
+  orgId?: string;
+  onCreated: (id: string) => void;
+  onCancel: () => void;
+}) {
+  async function handleSave(form: HospitalFormData) {
+    const res = await createHospital(form);
+    if (!res.success) throw new Error((res as any).error ?? 'Create failed');
+    onCreated((res.data as any)?.id ?? '');
   }
 
-  const sorted = useMemo(() => {
-    return [...cards].sort((a, b) => {
-      const av = sortKey === 'healthScore' ? healthScore(a) : (a as any)[sortKey];
-      const bv = sortKey === 'healthScore' ? healthScore(b) : (b as any)[sortKey];
-      if (typeof av === 'string') return sortDir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
-      return sortDir === 'asc' ? av - bv : bv - av;
-    });
-  }, [cards, sortKey, sortDir]);
+  return (
+    <HospitalForm
+      initial={{ name: '', address: '', phone: '', email: '', website: '', description: '', color: '#2563EB' }}
+      onSave={handleSave}
+      onCancel={onCancel}
+      isNew
+    />
+  );
+}
 
-  const cols: Array<{ key: SortKey; label: string; align?: string }> = [
-    { key: 'name',             label: 'Hospital'         },
-    { key: 'staffCount',       label: 'Staff',      align: 'right' },
-    { key: 'complianceRate',   label: 'Compliance', align: 'right' },
-    { key: 'trainingDueCount', label: 'Train. Due', align: 'right' },
-    { key: 'openRequests',     label: 'Requests',   align: 'right' },
-    { key: 'healthScore',      label: 'Health',     align: 'right' },
+// ─────────────────────────────────────────────────────────────
+// Snapshot KPI Cards
+// ─────────────────────────────────────────────────────────────
+
+interface KPIItem {
+  icon: React.ElementType;
+  label: string;
+  value: number;
+  section: SectionKey;
+  alert?: boolean;
+}
+
+function SnapshotCards({
+  snapshot, onNavigate,
+}: {
+  snapshot: {
+    staffCount: number; documentCount: number; projectCount: number;
+    departmentCount: number; openRequestCount: number; trainingDueCount: number;
+  };
+  onNavigate: (section: SectionKey) => void;
+}) {
+  const kpis: KPIItem[] = [
+    { icon: Users,         label: 'Staff Members',  value: snapshot.staffCount,       section: 'hr' },
+    { icon: FileText,      label: 'Documents',       value: snapshot.documentCount,    section: 'knowledge-base' },
+    { icon: FolderOpen,    label: 'Projects',        value: snapshot.projectCount,     section: 'projects' },
+    { icon: Layers,        label: 'Departments',     value: snapshot.departmentCount,  section: 'admin-departments' },
+    { icon: ClipboardList, label: 'Open Requests',   value: snapshot.openRequestCount, section: 'schedule-requests', alert: snapshot.openRequestCount > 0 },
+    { icon: GraduationCap, label: 'Training Due',    value: snapshot.trainingDueCount, section: 'training',          alert: snapshot.trainingDueCount > 0 },
   ];
 
   return (
-    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-      <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
-        <div className="flex items-center gap-2">
-          <BarChart3 className="h-4 w-4 text-slate-500" />
-          <p className="text-[13px] font-bold text-gray-900">Executive Comparison</p>
-        </div>
-        <p className="text-[11px] text-gray-400">{cards.length} hospitals · click columns to sort</p>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full">
-          <thead>
-            <tr className="bg-gray-50 border-b border-gray-100">
-              {cols.map(col => (
-                <th
-                  key={col.key}
-                  onClick={() => toggleSort(col.key)}
-                  className={cn(
-                    'px-5 py-3 text-[10px] font-bold uppercase tracking-widest text-gray-400 cursor-pointer hover:text-gray-700 select-none whitespace-nowrap',
-                    col.align === 'right' ? 'text-right' : 'text-left',
-                  )}
-                >
-                  {col.label}
-                  {sortKey === col.key && (
-                    <span className="ml-1 text-orange-500">{sortDir === 'asc' ? '↑' : '↓'}</span>
-                  )}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {sorted.map((c, i) => {
-              const score = healthScore(c);
-              const color = c.color ?? '#2563EB';
-              return (
-                <tr key={c.id} className="border-b border-gray-50 last:border-0 hover:bg-gray-50/60 transition-colors">
-                  <td className="px-5 py-3">
-                    <div className="flex items-center gap-2.5">
-                      <div className="h-7 w-7 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: `${color}18` }}>
-                        <Building2 className="h-3.5 w-3.5" style={{ color }} />
-                      </div>
-                      <div>
-                        <Link href={`/hospital/${c.id}`} className="text-[13px] font-semibold text-gray-900 hover:text-orange-600 transition-colors">
-                          {c.name}
-                        </Link>
-                        {i === 0 && <p className="text-[9px] text-green-600 font-bold uppercase tracking-wider">Top Performer</p>}
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-5 py-3 text-right">
-                    <span className="text-[13px] font-semibold text-gray-700">{c.staffCount}</span>
-                  </td>
-                  <td className="px-5 py-3 text-right">
-                    <ComplianceBadge rate={c.complianceRate} />
-                  </td>
-                  <td className="px-5 py-3 text-right">
-                    <span className={cn('text-[13px] font-semibold', c.trainingDueCount > 0 ? 'text-red-600' : 'text-gray-400')}>
-                      {c.trainingDueCount}
-                    </span>
-                  </td>
-                  <td className="px-5 py-3 text-right">
-                    <span className={cn('text-[13px] font-semibold', c.openRequests > 2 ? 'text-amber-600' : 'text-gray-400')}>
-                      {c.openRequests}
-                    </span>
-                  </td>
-                  <td className="px-5 py-3 text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      <div className="w-20 h-1.5 bg-gray-100 rounded-full overflow-hidden">
-                        <div
-                          className={cn('h-full rounded-full', score >= 80 ? 'bg-green-400' : score >= 60 ? 'bg-amber-400' : 'bg-red-400')}
-                          style={{ width: `${score}%` }}
-                        />
-                      </div>
-                      <span className="text-[12px] font-bold text-gray-700 w-8 text-right">{score}</span>
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────
-// AI Insights Panel
-// ─────────────────────────────────────────────────────────────
-
-interface AIInsight {
-  type: 'positive' | 'warning' | 'action' | 'info';
-  icon: React.ElementType;
-  text: string;
-}
-
-function generateInsights(cards: HospitalCard[], overview: OrgOverview): AIInsight[] {
-  if (cards.length === 0) return [];
-  const insights: AIInsight[] = [];
-
-  const scored = cards.map(c => ({ ...c, score: healthScore(c) })).sort((a, b) => b.score - a.score);
-  const best  = scored[0];
-  const worst = scored[scored.length - 1];
-
-  insights.push({
-    type: 'positive', icon: TrendingUp,
-    text: `${best.name} leads with a health score of ${best.score} — strong compliance and low open tasks.`,
-  });
-
-  const lowCompliance = cards.filter(c => c.complianceRate < 70);
-  if (lowCompliance.length > 0) {
-    insights.push({
-      type: 'warning', icon: Shield,
-      text: `${lowCompliance.map(c => c.name).join(' & ')} ${lowCompliance.length > 1 ? 'have' : 'has'} training compliance below 70% — immediate action needed.`,
-    });
-  }
-
-  const totalDue = cards.reduce((s, c) => s + c.trainingDueCount, 0);
-  if (totalDue > 0) {
-    insights.push({
-      type: 'warning', icon: GraduationCap,
-      text: `${totalDue} training enrollment${totalDue !== 1 ? 's' : ''} are coming due across the organization. Assign them before deadlines pass.`,
-    });
-  }
-
-  const highReq = cards.filter(c => c.openRequests > 3);
-  if (highReq.length > 0) {
-    insights.push({
-      type: 'action', icon: ClipboardList,
-      text: `${highReq.map(c => c.name).join(' & ')} ${highReq.length > 1 ? 'have' : 'has'} high pending schedule requests. Review and approve to unblock staff.`,
-    });
-  }
-
-  if (worst.score < 60) {
-    insights.push({
-      type: 'warning', icon: TrendingDown,
-      text: `${worst.name} has the lowest operational health (${worst.score}). Focus area: compliance improvement and clearing open requests.`,
-    });
-  }
-
-  insights.push({
-    type: 'info', icon: Activity,
-    text: `${overview.totalEmployees} total staff across ${overview.totalHospitals} hospitals. ${overview.upcomingEvents} events scheduled in the next 7 days.`,
-  });
-
-  return insights;
-}
-
-function AIInsightsPanel({ cards, overview }: { cards: HospitalCard[]; overview: OrgOverview }) {
-  const insights = useMemo(() => generateInsights(cards, overview), [cards, overview]);
-
-  const clsMap: Record<AIInsight['type'], string> = {
-    positive: 'bg-green-50 border-green-200 text-green-700',
-    warning:  'bg-amber-50 border-amber-200 text-amber-700',
-    action:   'bg-blue-50 border-blue-200 text-blue-700',
-    info:     'bg-slate-50 border-slate-200 text-slate-600',
-  };
-
-  return (
-    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-      <div className="flex items-center gap-2 px-5 py-3 border-b border-gray-100">
-        <Sparkles className="h-4 w-4 text-orange-500" />
-        <p className="text-[13px] font-bold text-gray-900">AI Insights</p>
-        <span className="ml-auto text-[10px] font-bold uppercase tracking-widest text-gray-400 bg-gray-100 rounded-full px-2 py-0.5">
-          Live Analysis
-        </span>
-      </div>
-      <div className="p-4 space-y-2.5">
-        {insights.map((ins, i) => (
-          <div key={i} className={cn('flex items-start gap-2.5 px-3.5 py-3 rounded-xl border text-[12px] font-medium', clsMap[ins.type])}>
-            <ins.icon className="h-4 w-4 shrink-0 mt-0.5" />
-            <p className="leading-relaxed">{ins.text}</p>
-          </div>
-        ))}
-        <Link
-          href="/ai-assistant"
-          className="flex items-center justify-center gap-2 w-full h-9 mt-1 rounded-xl bg-orange-500 hover:bg-orange-600 text-white text-[12px] font-semibold transition-colors"
+    <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
+      {kpis.map(k => (
+        <button
+          key={k.label}
+          onClick={() => onNavigate(k.section)}
+          className={cn(
+            'group flex flex-col items-center gap-2 py-4 px-3 rounded-xl border text-center transition-all hover:shadow-sm',
+            k.alert ? 'bg-red-50 border-red-200 hover:border-red-300' : 'bg-white border-slate-200 hover:border-slate-300',
+          )}
         >
-          <Sparkles className="h-3.5 w-3.5" /> Ask AI for deeper analysis
-        </Link>
-      </div>
+          <k.icon className={cn('h-4 w-4', k.alert ? 'text-red-500' : 'text-slate-400 group-hover:text-slate-600')} />
+          <span className={cn('text-[22px] font-bold leading-none tabular-nums', k.alert ? 'text-red-600' : 'text-slate-900')}>
+            {k.value}
+          </span>
+          <span className={cn('text-[11px] leading-tight', k.alert ? 'text-red-500 font-medium' : 'text-slate-500')}>
+            {k.label}
+          </span>
+        </button>
+      ))}
     </div>
   );
 }
 
 // ─────────────────────────────────────────────────────────────
-// Upcoming Events (cross-hospital)
+// Announcements Panel
 // ─────────────────────────────────────────────────────────────
 
-const EVENT_TYPE_COLORS: Record<string, string> = {
-  meeting: '#3b82f6', training: '#f97316', pto: '#10b981',
-  hospital_event: '#8b5cf6', town_hall: '#8b5cf6', onboarding: '#06b6d4',
-  deadline: '#ef4444', other: '#6b7280',
-};
+function AnnouncementsPanel({
+  announcements, canPost, hospitalId, onRefresh,
+}: {
+  announcements: HospitalAnnouncement[];
+  canPost: boolean;
+  hospitalId: string;
+  onRefresh: () => void;
+}) {
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [showForm, setShowForm] = useState(false);
+  const [title,    setTitle]    = useState('');
+  const [content,  setContent]  = useState('');
+  const [priority, setPriority] = useState<'normal' | 'high' | 'urgent'>('normal');
+  const [formErr,  setFormErr]  = useState('');
+  const [posting,  startPost]   = useTransition();
 
-function CrossHospitalEvents({ events }: { events: CrossHospitalEvent[] }) {
-  if (events.length === 0) return null;
+  function submitAnnouncement(e: React.FormEvent) {
+    e.preventDefault();
+    if (!title.trim()) { setFormErr('Title is required'); return; }
+    setFormErr('');
+    startPost(async () => {
+      const res = await createHospitalAnnouncement(hospitalId, { title, content, priority });
+      if (res.success) {
+        setTitle(''); setContent(''); setPriority('normal');
+        setShowForm(false); onRefresh();
+      } else if (!res.success) setFormErr(res.error ?? 'Failed');
+    });
+  }
 
   return (
-    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-      <div className="flex items-center justify-between px-5 py-3 border-b border-gray-100">
+    <div className="bg-white border border-slate-200 rounded-xl">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
         <div className="flex items-center gap-2">
-          <Calendar className="h-4 w-4 text-orange-500" />
-          <p className="text-[13px] font-bold text-gray-900">Upcoming Events</p>
-          <span className="text-[10px] text-gray-400 font-medium">— next 14 days across all hospitals</span>
+          <Bell className="h-4 w-4 text-slate-400" />
+          <p className="text-[13px] font-semibold text-slate-800">Announcements</p>
+          {announcements.length > 0 && (
+            <span className="h-5 min-w-[20px] px-1.5 rounded-full bg-slate-100 text-[11px] font-bold text-slate-600 flex items-center justify-center">
+              {announcements.length}
+            </span>
+          )}
         </div>
-        <Link href="/calendar" className="text-[11px] text-orange-500 hover:text-orange-600 flex items-center gap-1">
-          Master Calendar <ChevronRight className="h-3 w-3" />
-        </Link>
+        {canPost && !showForm && (
+          <button onClick={() => setShowForm(true)} className="flex items-center gap-1.5 h-7 px-3 text-[12px] font-semibold text-white bg-[#1e3a5f] hover:bg-[#162e4d] rounded-lg transition-colors">
+            <BellPlus className="h-3.5 w-3.5" />Post
+          </button>
+        )}
       </div>
-      <div className="divide-y divide-gray-50">
-        {events.map(ev => {
-          const typeColor = ev.color ?? EVENT_TYPE_COLORS[ev.event_type] ?? '#6b7280';
-          const date = new Date(ev.start_time);
-          const isToday = new Date().toDateString() === date.toDateString();
-          return (
-            <div key={ev.id} className="flex items-center gap-4 px-5 py-3 hover:bg-gray-50 transition-colors">
-              {/* Date chip */}
-              <div className="flex flex-col items-center justify-center h-11 w-11 rounded-xl shrink-0" style={{ backgroundColor: `${typeColor}15` }}>
-                <p className="text-[10px] font-bold uppercase" style={{ color: typeColor }}>
-                  {date.toLocaleDateString('en-US', { month: 'short' })}
-                </p>
-                <p className="text-[16px] font-bold leading-none" style={{ color: typeColor }}>
-                  {date.getDate()}
-                </p>
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  {isToday && <span className="text-[9px] font-bold uppercase tracking-wider text-green-600 bg-green-50 border border-green-100 rounded-full px-1.5 py-0.5">Today</span>}
-                  <p className="text-[13px] font-semibold text-gray-900 truncate">{ev.title}</p>
-                </div>
-                <p className="text-[11px] text-gray-400 mt-0.5">
-                  {ev.is_all_day ? 'All day' : `${fmtTime(ev.start_time)} – ${fmtTime(ev.end_time)}`}
-                  {ev.location && ` · ${ev.location}`}
-                </p>
-              </div>
-              {/* Hospital tag */}
-              <span
-                className="shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full border"
-                style={{ backgroundColor: `${ev.hospitalColor}18`, color: ev.hospitalColor, borderColor: `${ev.hospitalColor}35` }}
-              >
-                {ev.hospitalName}
-              </span>
+
+      {showForm && (
+        <div className="px-4 pt-3">
+          <form onSubmit={submitAnnouncement} className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-[13px] font-semibold text-slate-700">New Announcement</p>
+              <button type="button" onClick={() => setShowForm(false)} className="h-6 w-6 flex items-center justify-center rounded-lg hover:bg-slate-200 text-slate-400">
+                <X className="h-3.5 w-3.5" />
+              </button>
             </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
+            <input value={title} onChange={e => setTitle(e.target.value)} placeholder="Title…" className="w-full h-9 px-3 text-[13px] border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-200" />
+            <textarea value={content} onChange={e => setContent(e.target.value)} placeholder="Details (optional)…" rows={2} className="w-full px-3 py-2 text-[13px] border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-200 resize-none" />
+            <div className="flex items-center gap-3">
+              <select value={priority} onChange={e => setPriority(e.target.value as 'normal' | 'high' | 'urgent')} className="h-8 px-2 text-[12px] border border-slate-200 rounded-lg bg-white focus:outline-none">
+                <option value="normal">Normal</option>
+                <option value="high">High</option>
+                <option value="urgent">Urgent</option>
+              </select>
+              {formErr && <p className="flex-1 text-[11px] text-red-600">{formErr}</p>}
+              <div className="flex gap-2 ml-auto">
+                <button type="button" onClick={() => setShowForm(false)} className="h-8 px-3 text-[12px] font-medium text-slate-600 hover:bg-slate-200 rounded-lg transition-colors">Cancel</button>
+                <button type="submit" disabled={posting} className="h-8 px-4 text-[12px] font-semibold text-white bg-[#1e3a5f] hover:bg-[#162e4d] rounded-lg disabled:opacity-50 transition-colors">
+                  {posting ? 'Posting…' : 'Post'}
+                </button>
+              </div>
+            </div>
+          </form>
+        </div>
+      )}
 
-// ─────────────────────────────────────────────────────────────
-// Compliance Monitoring
-// ─────────────────────────────────────────────────────────────
-
-function ComplianceMonitor({ cards }: { cards: HospitalCard[] }) {
-  const sorted = [...cards].sort((a, b) => b.complianceRate - a.complianceRate);
-
-  return (
-    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-      <div className="flex items-center gap-2 px-5 py-3 border-b border-gray-100">
-        <ShieldCheck className="h-4 w-4 text-blue-500" />
-        <p className="text-[13px] font-bold text-gray-900">Compliance Monitoring</p>
-      </div>
-      <div className="p-5 space-y-4">
-        {sorted.map(c => {
-          const rate = c.complianceRate;
-          const color = c.color ?? '#2563EB';
-          const barColor = rate >= 90 ? '#22c55e' : rate >= 70 ? '#f59e0b' : '#ef4444';
-          const status = rate >= 90 ? { label: 'Compliant', cls: 'text-green-600 bg-green-50' }
-            : rate >= 70 ? { label: 'Attention', cls: 'text-amber-600 bg-amber-50' }
-            : { label: 'Critical',  cls: 'text-red-600 bg-red-50' };
-
+      <div className="divide-y divide-slate-50">
+        {announcements.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-10 text-center">
+            <Bell className="h-8 w-8 text-slate-200 mb-2" />
+            <p className="text-[13px] text-slate-400">No active announcements</p>
+            {canPost && !showForm && <button onClick={() => setShowForm(true)} className="mt-2 text-[12px] text-[#1e3a5f] font-medium hover:underline">Post the first announcement</button>}
+          </div>
+        ) : announcements.map(ann => {
+          const pc     = PRIORITY_CONFIG[ann.priority as keyof typeof PRIORITY_CONFIG] ?? PRIORITY_CONFIG.normal;
+          const isOpen = expanded === ann.id;
           return (
-            <div key={c.id}>
-              <div className="flex items-center gap-3 mb-1.5">
-                <div className="h-6 w-6 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: `${color}18` }}>
-                  <Building2 className="h-3 w-3" style={{ color }} />
+            <div key={ann.id}>
+              <button className="w-full flex items-start gap-3 px-4 py-3.5 hover:bg-slate-50 transition-colors text-left" onClick={() => setExpanded(isOpen ? null : ann.id)}>
+                <span className={cn('h-2 w-2 rounded-full mt-1.5 shrink-0', pc.dot)} />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="text-[13px] font-semibold text-slate-900">{ann.title}</p>
+                    {ann.priority !== 'normal' && <span className={cn('text-[10px] font-bold uppercase tracking-wide border rounded-full px-1.5 py-0.5', pc.badge)}>{pc.label}</span>}
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-0.5">{ann.createdBy ?? 'Admin'} · {relativeTime(ann.created_at)}</p>
                 </div>
-                <p className="text-[13px] font-semibold text-gray-800 flex-1">{c.name}</p>
-                <span className={cn('text-[10px] font-bold px-2 py-0.5 rounded-full', status.cls)}>{status.label}</span>
-                <p className="text-[13px] font-bold text-gray-800 w-10 text-right">{rate}%</p>
-              </div>
-              <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden ml-9">
-                <div
-                  className="h-full rounded-full transition-all duration-700"
-                  style={{ width: `${rate}%`, backgroundColor: barColor }}
-                />
-              </div>
-              {c.trainingDueCount > 0 && (
-                <p className="ml-9 mt-1 text-[10px] text-amber-600 flex items-center gap-1">
-                  <AlertCircle className="h-3 w-3" />
-                  {c.trainingDueCount} training enrollment{c.trainingDueCount !== 1 ? 's' : ''} due
-                </p>
+                <ChevronRight className={cn('h-4 w-4 text-slate-300 shrink-0 mt-0.5 transition-transform duration-150', isOpen && 'rotate-90')} />
+              </button>
+              {isOpen && ann.content && (
+                <div className="mx-4 mb-3 px-3 py-2.5 bg-slate-50 rounded-lg">
+                  <p className="text-[12px] text-slate-600 leading-relaxed whitespace-pre-wrap">{ann.content}</p>
+                </div>
               )}
             </div>
           );
@@ -668,333 +597,226 @@ function ComplianceMonitor({ cards }: { cards: HospitalCard[] }) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Operational Alerts
+// Quick Resources Panel
 // ─────────────────────────────────────────────────────────────
 
-interface OpsAlert {
-  id: string;
-  severity: 'critical' | 'warning' | 'info';
-  hospitalName: string;
-  hospitalId: string;
-  hospitalColor: string;
-  message: string;
-  action: { label: string; href: string };
+function ResourcesPanel({ resources, onNavigate }: { resources: WorkspaceResource[]; onNavigate: (s: SectionKey) => void }) {
+  const [search, setSearch] = useState('');
+  const filtered = resources.filter(r => !search || r.title.toLowerCase().includes(search.toLowerCase()) || (r.categoryName ?? '').toLowerCase().includes(search.toLowerCase()));
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
+        <div className="flex items-center gap-2">
+          <BookOpen className="h-4 w-4 text-slate-400" />
+          <p className="text-[13px] font-semibold text-slate-800">Quick Resources</p>
+        </div>
+        <button onClick={() => onNavigate('knowledge-base')} className="flex items-center gap-1 text-[11px] text-[#1e3a5f] font-medium hover:underline">
+          View all <ChevronRight className="h-3 w-3" />
+        </button>
+      </div>
+      {resources.length > 4 && (
+        <div className="px-4 pt-3">
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search resources…" className="w-full h-8 pl-8 pr-3 text-[12px] border border-slate-200 rounded-lg bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-200" />
+          </div>
+        </div>
+      )}
+      <div className="p-3">
+        {filtered.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-10 text-center">
+            <BookOpen className="h-8 w-8 text-slate-200 mb-2" />
+            <p className="text-[13px] text-slate-400">{resources.length === 0 ? 'No published documents yet' : 'No results found'}</p>
+            <button onClick={() => onNavigate('knowledge-base')} className="mt-2 text-[12px] text-[#1e3a5f] font-medium hover:underline">Open Knowledge Base</button>
+          </div>
+        ) : filtered.map(r => {
+          const color = r.categoryColor ?? '#6366f1';
+          const Icon  = CATEGORY_ICONS[r.categoryIcon ?? ''] ?? FileText;
+          return (
+            <button key={r.id} onClick={() => onNavigate('knowledge-base')} className="group w-full flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-slate-50 text-left transition-colors">
+              <div className="h-8 w-8 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: `${color}15` }}>
+                <Icon className="h-4 w-4" style={{ color }} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-[13px] font-medium text-slate-800 truncate group-hover:text-[#1e3a5f] transition-colors">{r.title}</p>
+                {r.categoryName && <p className="text-[11px] text-slate-400">{r.categoryName}</p>}
+              </div>
+              <ExternalLink className="h-3.5 w-3.5 text-slate-300 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
-function buildAlerts(cards: HospitalCard[]): OpsAlert[] {
-  const alerts: OpsAlert[] = [];
-  for (const c of cards) {
-    if (c.complianceRate < 70) {
-      alerts.push({
-        id: `compliance-${c.id}`,
-        severity: 'critical',
-        hospitalName: c.name,
-        hospitalId: c.id,
-        hospitalColor: c.color ?? '#ef4444',
-        message: `Compliance rate is ${c.complianceRate}% — below the 70% threshold. Required training must be completed.`,
-        action: { label: 'View Training', href: `/hospital/${c.id}?tab=training` },
-      });
-    }
-    if (c.trainingDueCount > 0) {
-      alerts.push({
-        id: `training-${c.id}`,
-        severity: c.trainingDueCount > 3 ? 'warning' : 'info',
-        hospitalName: c.name,
-        hospitalId: c.id,
-        hospitalColor: c.color ?? '#f59e0b',
-        message: `${c.trainingDueCount} training enrollment${c.trainingDueCount !== 1 ? 's' : ''} coming due. Assign and complete before deadlines.`,
-        action: { label: 'View Training', href: `/training` },
-      });
-    }
-    if (c.openRequests > 3) {
-      alerts.push({
-        id: `requests-${c.id}`,
-        severity: 'warning',
-        hospitalName: c.name,
-        hospitalId: c.id,
-        hospitalColor: c.color ?? '#f59e0b',
-        message: `${c.openRequests} pending schedule requests awaiting approval. Staff may be blocked.`,
-        action: { label: 'Review Requests', href: `/schedule-requests` },
-      });
-    }
-  }
-  return alerts.sort((a, b) => {
-    const order = { critical: 0, warning: 1, info: 2 };
-    return order[a.severity] - order[b.severity];
+// ─────────────────────────────────────────────────────────────
+// Workspace Skeleton
+// ─────────────────────────────────────────────────────────────
+
+function WorkspaceSkeleton() {
+  return (
+    <div className="space-y-4 animate-pulse">
+      <div className="h-[76px] bg-slate-100 rounded-xl" />
+      <div className="grid grid-cols-6 gap-3">{Array.from({ length: 6 }).map((_, i) => <div key={i} className="h-24 bg-slate-100 rounded-xl" />)}</div>
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+        <div className="h-56 bg-slate-100 rounded-xl" />
+        <div className="h-56 bg-slate-100 rounded-xl" />
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Hub Shell (root export)
+// ─────────────────────────────────────────────────────────────
+
+interface HubShellProps {
+  hospitals: HospitalCard[];
+  userId: string;
+  viewRole: ViewRole;
+  userRoles: string[];
+}
+
+export function HubShell({ hospitals: initialHospitals, userId, viewRole, userRoles }: HubShellProps) {
+  const navigate     = useAppStore(s => s.navigate);
+  const queryClient  = useQueryClient();
+  const canPost      = userRoles.some(r => POSTER_ROLES.includes(r));
+  const isSuperAdmin = userRoles.includes('super_admin');
+
+  const [hospitals,   setHospitals]   = useState<HospitalCard[]>(initialHospitals);
+  const [selectedId,  setSelectedId]  = useState<string>(initialHospitals[0]?.id ?? '');
+  const [showAddForm, setShowAddForm] = useState(false);
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['hospital-workspace', selectedId],
+    queryFn:  () => getHospitalWorkspaceData(selectedId),
+    enabled:  !!selectedId,
+    staleTime: 30_000,
   });
-}
 
-function OperationalAlertsFeed({ cards }: { cards: HospitalCard[] }) {
-  const alerts = useMemo(() => buildAlerts(cards), [cards]);
+  const workspace    = data?.success ? data.data : null;
+  const selectedCard = hospitals.find(h => h.id === selectedId);
 
-  if (alerts.length === 0) {
+  function invalidateWorkspace() {
+    queryClient.invalidateQueries({ queryKey: ['hospital-workspace', selectedId] });
+  }
+
+  function handleHospitalSaved() {
+    // Refresh hospitals list + workspace
+    queryClient.invalidateQueries({ queryKey: ['hospital-hub-init'] });
+    queryClient.invalidateQueries({ queryKey: ['hospital-workspace', selectedId] });
+  }
+
+  function handleHospitalDeleted() {
+    const remaining = hospitals.filter(h => h.id !== selectedId);
+    setHospitals(remaining);
+    setSelectedId(remaining[0]?.id ?? '');
+    queryClient.invalidateQueries({ queryKey: ['hospital-hub-init'] });
+  }
+
+  function handleHospitalCreated(newId: string) {
+    setShowAddForm(false);
+    queryClient.invalidateQueries({ queryKey: ['hospital-hub-init'] });
+    if (newId) setSelectedId(newId);
+  }
+
+  if (hospitals.length === 0 && !showAddForm) {
     return (
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 flex items-center gap-3">
-        <CheckCircle2 className="h-5 w-5 text-green-500 shrink-0" />
-        <div>
-          <p className="text-[14px] font-semibold text-gray-800">All Systems Operational</p>
-          <p className="text-[12px] text-gray-400">No alerts detected across any hospital.</p>
+      <div className="flex flex-col h-full min-h-0">
+        <PageHeader title="Hospital Hub" description="Hospital-specific resources and information" color="navy" variant="banner" icon={<Building2 className="h-7 w-7" />} />
+        <div className="flex flex-col items-center justify-center flex-1 py-24 text-center gap-4">
+          <Building2 className="h-12 w-12 text-slate-200" />
+          <div>
+            <p className="text-[15px] font-semibold text-slate-600">No hospitals found</p>
+            <p className="text-[13px] text-slate-400 mt-1">Seed hospitals from Admin Settings to get started.</p>
+          </div>
+          {isSuperAdmin && (
+            <button onClick={() => setShowAddForm(true)} className="flex items-center gap-2 h-9 px-4 text-[13px] font-semibold text-white bg-[#1e3a5f] hover:bg-[#162e4d] rounded-xl transition-colors">
+              <Plus className="h-4 w-4" />Add First Hospital
+            </button>
+          )}
         </div>
       </div>
     );
   }
 
-  const clsMap = {
-    critical: { bg: 'bg-red-50 border-red-200',   icon: 'text-red-500',   dot: 'bg-red-500' },
-    warning:  { bg: 'bg-amber-50 border-amber-200', icon: 'text-amber-500', dot: 'bg-amber-500' },
-    info:     { bg: 'bg-blue-50 border-blue-200',   icon: 'text-blue-500',  dot: 'bg-blue-400' },
-  };
-
   return (
-    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-      <div className="flex items-center gap-2 px-5 py-3 border-b border-gray-100">
-        <Bell className="h-4 w-4 text-red-500" />
-        <p className="text-[13px] font-bold text-gray-900">Operational Alerts</p>
-        <span className="ml-auto h-5 w-5 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
-          {alerts.length}
-        </span>
-      </div>
-      <div className="divide-y divide-gray-50">
-        {alerts.map(a => {
-          const cls = clsMap[a.severity];
-          return (
-            <div key={a.id} className={cn('flex items-start gap-3.5 px-5 py-3.5 transition-colors hover:bg-gray-50')}>
-              <div className={cn('h-2 w-2 rounded-full mt-1.5 shrink-0', cls.dot)} />
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-0.5">
-                  <span
-                    className="text-[10px] font-bold px-1.5 py-0.5 rounded-full border"
-                    style={{
-                      backgroundColor: `${a.hospitalColor}15`,
-                      color: a.hospitalColor,
-                      borderColor: `${a.hospitalColor}30`,
-                    }}
-                  >
-                    {a.hospitalName}
-                  </span>
-                  <span className={cn('text-[10px] font-bold uppercase tracking-wider', cls.icon)}>
-                    {a.severity}
-                  </span>
-                </div>
-                <p className="text-[12px] text-gray-700 leading-relaxed">{a.message}</p>
-              </div>
-              <Link
-                href={a.action.href}
-                className="shrink-0 text-[11px] font-semibold text-orange-500 hover:text-orange-600 whitespace-nowrap"
-              >
-                {a.action.label} →
-              </Link>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────
-// Hub Shell (root)
-// ─────────────────────────────────────────────────────────────
-
-interface HubShellProps {
-  orgName: string;
-  overview: OrgOverview | null;
-  cards: HospitalCard[];
-  crossEvents: CrossHospitalEvent[];
-  myHospitalIds: string[];
-  userId: string;
-  viewRole: ViewRole;
-}
-
-export function HubShell({
-  orgName, overview, cards, crossEvents, myHospitalIds, userId, viewRole,
-}: HubShellProps) {
-  const router = useRouter();
-  const [search,       setSearch]       = useState('');
-  const [selectedHosp, setSelectedHosp] = useState<string | null>(null);
-  const [lastRefresh,  setLastRefresh]  = useState<Date | null>(null);
-  const [isLive,       setIsLive]       = useState(false);
-
-  // Set lastRefresh only after mount to avoid SSR/client time mismatch
-  useEffect(() => { setLastRefresh(new Date()); }, []);
-
-  const mySet = new Set(myHospitalIds);
-  const isExecutive = viewRole === 'executive';
-  const isManager   = viewRole === 'manager';
-
-  // ── Supabase Realtime ──────────────────────────────────────
-  useEffect(() => {
-    const supabase = createSupabaseBrowserClient();
-    const channel = supabase
-      .channel('hospital-hub-live')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'hospitals' },          () => { router.refresh(); setLastRefresh(new Date()); })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'user_hospital_roles' }, () => { router.refresh(); setLastRefresh(new Date()); })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'calendar_events' },    () => { router.refresh(); setLastRefresh(new Date()); })
-      .subscribe(status => setIsLive(status === 'SUBSCRIBED'));
-
-    return () => { supabase.removeChannel(channel); };
-  }, [router]);
-
-  // ── Filtered cards for role ────────────────────────────────
-  const roleCards = isExecutive ? cards : cards.filter(c => mySet.has(c.id));
-
-  const filteredCards = roleCards.filter(c => {
-    if (selectedHosp && c.id !== selectedHosp) return false;
-    if (search && !c.name.toLowerCase().includes(search.toLowerCase()) && !(c.address ?? '').toLowerCase().includes(search.toLowerCase())) return false;
-    return true;
-  });
-
-  const ov: OrgOverview = overview ?? {
-    totalHospitals: 0, totalEmployees: 0, totalDepartments: 0,
-    openRequests: 0, upcomingEvents: 0, trainingDue: 0, openTasks: 0,
-  };
-
-  const totalAlerts = buildAlerts(roleCards).filter(a => a.severity !== 'info').length;
-
-  return (
-    <div className="flex flex-col gap-5 pb-12">
-
-      {/* ── Command Center Header ─────────────────────────── */}
-      <div className="rounded-2xl bg-linear-to-br from-slate-900 via-slate-800 to-slate-900 text-white px-6 py-6 shadow-xl">
-        {/* Top row */}
-        <div className="flex items-start justify-between mb-5 gap-4 flex-wrap">
-          <div>
-            <div className="flex items-center gap-2 mb-1.5">
-              <div className="h-8 w-8 rounded-xl bg-orange-500 flex items-center justify-center shadow-lg">
-                <Building2 className="h-4.5 w-4.5 text-white" />
-              </div>
-              <p className="text-[11px] font-bold uppercase tracking-widest text-slate-400">Operations Command Center</p>
-              {/* Live indicator */}
-              <div className="flex items-center gap-1.5 bg-white/10 rounded-full px-2.5 py-1">
-                <div className={cn('h-2 w-2 rounded-full', isLive ? 'bg-green-400 animate-pulse' : 'bg-slate-500')} />
-                <p className="text-[10px] font-semibold text-slate-300">{isLive ? 'Live' : 'Connecting'}</p>
-              </div>
-            </div>
-            <h1 className="text-[24px] font-bold text-white tracking-tight">{orgName}</h1>
-            <p className="text-[12px] text-slate-400 mt-0.5">
-              Multi-Hospital Management · {cards.length} locations{lastRefresh ? ` · Last updated ${lastRefresh.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}` : ''}
-            </p>
-          </div>
-
-          <div className="flex items-center gap-2 shrink-0 flex-wrap">
-            {totalAlerts > 0 && (
-              <div className="flex items-center gap-1.5 bg-red-500/20 border border-red-400/30 rounded-xl px-3 py-2 text-[12px] font-semibold text-red-300">
-                <AlertCircle className="h-3.5 w-3.5" />
-                {totalAlerts} alert{totalAlerts !== 1 ? 's' : ''} need attention
-              </div>
-            )}
-            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-widest bg-white/10 rounded-xl px-3 py-2">
-              {ROLE_LABELS[viewRole] ?? viewRole} View
-            </span>
-            <button
-              onClick={() => { router.refresh(); setLastRefresh(new Date()); }}
-              className="flex items-center gap-1.5 h-9 px-3 rounded-xl bg-white/10 hover:bg-white/20 border border-white/10 text-slate-300 text-[12px] font-medium transition-colors"
-            >
-              <RefreshCw className="h-3.5 w-3.5" /> Refresh
-            </button>
-            <Link
-              href="/ai-assistant"
-              className="flex items-center gap-1.5 h-9 px-3 rounded-xl bg-orange-500/20 hover:bg-orange-500/30 border border-orange-400/20 text-orange-300 text-[12px] font-medium transition-colors"
-            >
-              <Sparkles className="h-3.5 w-3.5" /> Ask AI
-            </Link>
-          </div>
-        </div>
-
-        {/* KPI bar */}
-        {overview && <KPIBar overview={ov} cards={roleCards} />}
-      </div>
-
-      {/* ── Hospital Switcher ────────────────────────────────── */}
-      <HospitalSwitcher
-        cards={roleCards}
-        selected={selectedHosp}
-        onSelect={setSelectedHosp}
-        myHospitalIds={myHospitalIds}
-        viewRole={viewRole}
+    <div className="flex flex-col h-full min-h-0">
+      {/* Banner header */}
+      <PageHeader
+        title="Hospital Hub"
+        description="Hospital-specific resources and information"
+        color="navy"
+        variant="banner"
+        icon={<Building2 className="h-7 w-7" />}
       />
 
-      {/* ── Search bar ──────────────────────────────────────── */}
-      <div className="flex items-center gap-3">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-          <input
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Search hospitals by name or location…"
-            className="w-full h-10 pl-9 pr-4 border border-gray-200 rounded-xl text-[13px] focus:outline-none focus:ring-2 focus:ring-orange-300 bg-white shadow-sm"
+      {/* Everything below header scrolls as ONE unit */}
+      <div className="flex-1 overflow-y-auto min-h-0 space-y-4 pb-10">
+
+        {/* Hospital Selector */}
+        <HospitalSelector
+          hospitals={hospitals}
+          selectedId={selectedId}
+          onSelect={id => { setSelectedId(id); setShowAddForm(false); }}
+          isSuperAdmin={isSuperAdmin}
+          onAddNew={() => { setShowAddForm(true); setSelectedId(''); }}
+        />
+
+        {/* Add Hospital form */}
+        {showAddForm && (
+          <AddHospitalPanel
+            onCreated={handleHospitalCreated}
+            onCancel={() => { setShowAddForm(false); setSelectedId(hospitals[0]?.id ?? ''); }}
           />
-        </div>
-        <div className="h-10 px-4 flex items-center rounded-xl border border-gray-200 bg-white text-[13px] text-gray-500 shadow-sm">
-          {filteredCards.length}/{roleCards.length} shown
-        </div>
-      </div>
+        )}
 
-      {/* ── Hospital Cards Grid ──────────────────────────────── */}
-      {filteredCards.length === 0 ? (
-        <div className="text-center py-20 bg-white rounded-2xl border border-gray-100 shadow-sm">
-          <Building2 className="h-16 w-16 text-gray-200 mx-auto mb-4" />
-          <p className="text-[16px] font-semibold text-gray-600">No hospitals match your search</p>
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-          {filteredCards.map(card => (
-            <HospCard key={card.id} card={card} isMine={mySet.has(card.id)} />
-          ))}
-        </div>
-      )}
+        {/* Loading skeleton */}
+        {!showAddForm && selectedId && isLoading && !workspace && <WorkspaceSkeleton />}
 
-      {/* ── Executive Sections (exec + manager) ─────────────── */}
-      {(isExecutive || isManager) && (
-        <>
-          {/* Executive comparison — exec only */}
-          {isExecutive && roleCards.length > 1 && (
-            <ExecutiveComparison cards={roleCards} />
-          )}
+        {/* Workspace */}
+        {!showAddForm && workspace && selectedCard && (
+          <>
+            {/* 1 — Hospital Information */}
+            <HospitalInfoHeader
+              hospital={selectedCard}
+              isSuperAdmin={isSuperAdmin}
+              onSaved={handleHospitalSaved}
+              onDeleted={handleHospitalDeleted}
+            />
 
-          {/* AI insights — exec only */}
-          {isExecutive && overview && (
-            <AIInsightsPanel cards={roleCards} overview={ov} />
-          )}
+            {/* 2 — KPI Cards */}
+            <SnapshotCards snapshot={workspace.snapshot} onNavigate={navigate} />
 
-          {/* Two-column layout for events + compliance */}
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
-            {crossEvents.length > 0 && <CrossHospitalEvents events={crossEvents} />}
-            {roleCards.length > 0 && <ComplianceMonitor cards={roleCards} />}
-          </div>
+            {/* 3 & 4 — Announcements + Resources */}
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+              <AnnouncementsPanel
+                announcements={workspace.announcements}
+                canPost={canPost}
+                hospitalId={selectedId}
+                onRefresh={invalidateWorkspace}
+              />
+              <ResourcesPanel resources={workspace.resources} onNavigate={navigate} />
+            </div>
 
-          {/* Operational alerts */}
-          <OperationalAlertsFeed cards={roleCards} />
-        </>
-      )}
-
-      {/* ── Quick Nav Footer ─────────────────────────────────── */}
-      <div className="rounded-2xl border border-gray-100 bg-white shadow-sm p-5">
-        <p className="text-[11px] font-bold uppercase tracking-widest text-gray-400 mb-3">Quick Navigation</p>
-        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
-          {[
-            { href: '/training',      icon: GraduationCap, label: 'Training',        sub: 'Courses & LMS'         },
-            { href: '/calendar',      icon: Calendar,      label: 'Master Calendar', sub: 'All hospital events'   },
-            { href: '/communication', icon: MessageSquare, label: 'Communications',  sub: 'Channels & messages'   },
-            { href: '/documents',     icon: FileText,      label: 'Documents',       sub: 'Knowledge base'        },
-            { href: '/projects',      icon: Zap,           label: 'Projects',        sub: 'Tasks & milestones'    },
-            { href: '/kpi',           icon: BarChart3,     label: 'KPI Analytics',   sub: 'Performance data'      },
-          ].map(item => (
-            <Link
-              key={item.href}
-              href={item.href}
-              className="flex flex-col items-center gap-2 p-3 rounded-xl border border-gray-100 hover:border-orange-200 hover:bg-orange-50/50 transition-all group text-center"
-            >
-              <div className="h-9 w-9 rounded-lg bg-orange-50 group-hover:bg-orange-100 flex items-center justify-center transition-colors">
-                <item.icon className="h-4.5 w-4.5 text-orange-500" />
+            {/* Alerts strip */}
+            {(workspace.snapshot.openRequestCount > 3 || workspace.snapshot.trainingDueCount > 0) && (
+              <div className="flex items-start gap-3 px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl">
+                <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+                <div className="flex-1 text-[12px] text-amber-700 space-y-0.5">
+                  {workspace.snapshot.trainingDueCount > 0 && (
+                    <p><strong>{workspace.snapshot.trainingDueCount} staff</strong> have training due. <button onClick={() => navigate('training')} className="underline font-semibold">View Training</button></p>
+                  )}
+                  {workspace.snapshot.openRequestCount > 3 && (
+                    <p><strong>{workspace.snapshot.openRequestCount} requests</strong> pending. <button onClick={() => navigate('schedule-requests')} className="underline font-semibold">Review</button></p>
+                  )}
+                </div>
               </div>
-              <div>
-                <p className="text-[12px] font-semibold text-gray-800">{item.label}</p>
-                <p className="text-[10px] text-gray-400">{item.sub}</p>
-              </div>
-            </Link>
-          ))}
-        </div>
+            )}
+          </>
+        )}
       </div>
     </div>
   );

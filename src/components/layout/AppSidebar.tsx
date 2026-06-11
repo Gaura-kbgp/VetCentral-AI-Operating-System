@@ -1,174 +1,197 @@
 'use client';
 
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { useState, useEffect } from 'react';
 import {
   LayoutDashboard, Calendar, MessageSquare, BookOpen,
   GraduationCap, FolderOpen, Building2, Sparkles,
   UserPlus, Inbox, Settings, ClipboardList, Users, UserCog,
   CheckSquare, Shield, FileText, AlertCircle, BarChart3, Activity,
+  Megaphone,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getVisibleNavItems, ROLE_META, type NavItem } from '@/lib/permissions';
+import { useSPANavigation, HREF_TO_SECTION } from '@/contexts/spa-navigation';
 import type { AppRole } from '@/types/database';
-
-// ── Icon registry (avoids importing entire lucide in permissions.ts) ──────
 
 const ICON_MAP: Record<string, React.ElementType> = {
   LayoutDashboard, Calendar, MessageSquare, BookOpen,
   GraduationCap, FolderOpen, Building2, Sparkles,
   UserPlus, Inbox, Settings, ClipboardList, Users, UserCog,
   CheckSquare, CheckSquare2: CheckSquare, Shield, FileText, AlertCircle,
-  BarChart3, Activity,
+  BarChart3, Activity, Megaphone,
 };
-
-// ── NavLink ───────────────────────────────────────────────────────────────
 
 interface NavLinkProps {
   item: NavItem;
-  pathname: string;
+  activeSection: string;
   badge?: number;
+  onClick: () => void;
 }
 
-function NavLink({ item, pathname, badge }: NavLinkProps) {
+function NavLink({ item, activeSection, badge, onClick }: NavLinkProps) {
   const Icon = ICON_MAP[item.iconKey] ?? LayoutDashboard;
-  const isActive =
-    pathname === item.href ||
-    (item.href !== '/dashboard' && pathname.startsWith(item.href));
+  const sectionKey = HREF_TO_SECTION[item.href];
+  const isActive = sectionKey ? activeSection === sectionKey : false;
 
   return (
-    <Link
-      href={item.href}
+    <button
+      type="button"
+      onClick={onClick}
       className={cn(
-        'flex items-center gap-3 px-3 py-2.5 rounded-lg text-[14px] transition-colors',
+        'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-[13.5px] transition-all text-left',
         isActive
-          ? 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 font-semibold'
-          : 'text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800/60 hover:text-gray-800 dark:hover:text-gray-200',
+          ? 'bg-[#e8f0fe] text-[#1e3a5f] font-semibold'
+          : 'text-gray-500 dark:text-gray-400 hover:bg-slate-50 dark:hover:bg-gray-800/60 hover:text-gray-800 dark:hover:text-gray-200',
       )}
     >
       <Icon className={cn(
         'h-4 w-4 shrink-0',
-        isActive ? 'text-gray-900 dark:text-gray-100' : 'text-gray-400 dark:text-gray-500',
+        isActive ? 'text-[#1e3a5f]' : 'text-gray-400 dark:text-gray-500',
       )} />
       <span className="flex-1">{item.label}</span>
       {badge != null && badge > 0 && (
-        <span className="ml-auto text-[10px] font-bold bg-amber-500 text-white rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
+        <span className="ml-auto text-[10px] font-bold bg-amber-500 text-white rounded-full min-w-4.5 h-4.5 flex items-center justify-center px-1">
           {badge > 99 ? '99+' : badge}
         </span>
       )}
-    </Link>
+    </button>
   );
 }
 
 function SectionLabel({ label }: { label: string }) {
   return (
-    <div className="pt-3 pb-1 px-3">
-      <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 dark:text-gray-600">
+    <div className="pt-4 pb-1 px-3">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400 dark:text-gray-600">
         {label}
       </p>
     </div>
   );
 }
 
-// ── Sidebar ───────────────────────────────────────────────────────────────
-
 interface Props {
   role?: AppRole | null;
   pendingRequestCount?: number;
 }
 
-export default function AppSidebar({ role, pendingRequestCount = 0 }: Props) {
-  const pathname = usePathname();
+function AppSidebarInner({ role, pendingRequestCount = 0 }: Props) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+
+  const { activeSection, navigate } = useSPANavigation();
 
   const visibleItems = getVisibleNavItems(role);
-
-  const coreItems   = visibleItems.filter(i => i.section === 'core');
-  const hrItems     = visibleItems.filter(i => i.section === 'hr');
-  const adminItems  = visibleItems.filter(i => i.section === 'admin');
-
-  const roleMeta = role ? ROLE_META[role] : null;
+  const coreItems  = visibleItems.filter(i => i.section === 'core');
+  const hrItems    = visibleItems.filter(i => i.section === 'hr');
+  const adminItems = visibleItems.filter(i => i.section === 'admin');
+  const roleMeta   = role ? ROLE_META[role] : null;
 
   function getBadge(item: NavItem): number | undefined {
     if (item.badge === 'pendingRequests') return pendingRequestCount;
     return undefined;
   }
 
+  function handleNav(item: NavItem) {
+    const section = HREF_TO_SECTION[item.href];
+    if (section) navigate(section);
+  }
+
+  if (!mounted) {
+    return (
+      <aside className="hidden md:flex flex-col w-68 bg-white dark:bg-gray-900 border-r border-slate-200/80 dark:border-gray-800 shrink-0" />
+    );
+  }
+
   return (
-    <aside className="hidden md:flex flex-col w-[272px] bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-800 shrink-0">
+    <aside className="hidden md:flex flex-col w-68 bg-white dark:bg-gray-900 border-r border-slate-200/80 dark:border-gray-800 shrink-0">
       {/* Logo */}
-      <div className="flex items-center gap-3 px-5 py-5 border-b border-gray-100 dark:border-gray-800">
+      <div className="flex items-center gap-3 px-5 py-4.5 border-b border-slate-100 dark:border-gray-800">
         <div
-          className="flex items-center justify-center w-10 h-10 rounded-xl shrink-0"
-          style={{ backgroundColor: '#1e3a5f' }}
+          className="flex items-center justify-center w-9 h-9 rounded-xl shrink-0 shadow-sm"
+          style={{ background: 'linear-gradient(135deg, #1e3a5f 0%, #2563eb 100%)' }}
         >
-          <span className="text-white text-base font-bold">V</span>
+          <svg viewBox="0 0 20 20" fill="none" className="w-5 h-5">
+            <path d="M10 2C6.13 2 3 5.13 3 9c0 2.39 1.19 4.5 3 5.74V16a1 1 0 001 1h6a1 1 0 001-1v-1.26C15.81 13.5 17 11.39 17 9c0-3.87-3.13-7-7-7z" fill="white" opacity="0.9"/>
+            <circle cx="7.5" cy="8.5" r="1.2" fill="#1e3a5f"/>
+            <circle cx="12.5" cy="8.5" r="1.2" fill="#1e3a5f"/>
+            <path d="M7.5 12c.83.63 1.67.94 2.5.94s1.67-.31 2.5-.94" stroke="#1e3a5f" strokeWidth="1.1" strokeLinecap="round"/>
+          </svg>
         </div>
         <div>
-          <p
-            className="text-[15px] font-bold text-gray-900 dark:text-gray-100 leading-tight tracking-tight"
-            style={{ fontFamily: 'var(--font-jakarta), var(--font-inter), sans-serif' }}
-          >
+          <p className="text-[15px] font-bold text-gray-900 dark:text-gray-100 leading-tight tracking-tight"
+            style={{ fontFamily: 'var(--font-jakarta), var(--font-inter), sans-serif' }}>
             VetCentral
           </p>
-          <p
-            className="text-gray-400 dark:text-gray-500 mt-0.5 tracking-wide uppercase"
-            style={{ fontSize: '10px', letterSpacing: '0.06em' }}
-          >
+          <p className="text-slate-400 dark:text-gray-500 mt-0.5 tracking-wide" style={{ fontSize: '10px', letterSpacing: '0.05em' }}>
             AI Operating System
           </p>
         </div>
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-0.5">
-        {/* Core items */}
+      <nav className="flex-1 overflow-y-auto py-3 px-3 space-y-0.5">
         {coreItems.map(item => (
-          <NavLink key={item.href} item={item} pathname={pathname} badge={getBadge(item)} />
+          <NavLink
+            key={item.href}
+            item={item}
+            activeSection={activeSection}
+            badge={getBadge(item)}
+            onClick={() => handleNav(item)}
+          />
         ))}
 
-        {/* HR section */}
         {hrItems.length > 0 && (
           <>
             <SectionLabel label="HR" />
             {hrItems.map(item => (
-              <NavLink key={item.href} item={item} pathname={pathname} badge={getBadge(item)} />
+              <NavLink
+                key={item.href}
+                item={item}
+                activeSection={activeSection}
+                badge={getBadge(item)}
+                onClick={() => handleNav(item)}
+              />
             ))}
           </>
         )}
 
-        {/* Admin section */}
         {adminItems.length > 0 && (
           <>
             <SectionLabel label="Admin" />
             {adminItems.map(item => (
-              <NavLink key={item.href} item={item} pathname={pathname} badge={getBadge(item)} />
+              <NavLink
+                key={item.href}
+                item={item}
+                activeSection={activeSection}
+                badge={getBadge(item)}
+                onClick={() => handleNav(item)}
+              />
             ))}
           </>
         )}
       </nav>
 
-      {/* Role badge at bottom */}
+      {/* Role badge */}
       {roleMeta && (
-        <div className="px-4 pb-4 pt-2 border-t border-gray-100 dark:border-gray-800">
-          <div className="flex items-center gap-2">
-            <span
-              className="inline-block w-2 h-2 rounded-full shrink-0"
-              style={{ backgroundColor: roleMeta.color }}
-            />
-            <span className="text-xs font-medium text-gray-600 dark:text-gray-400">
-              {roleMeta.label}
-            </span>
+        <div className="px-3 pb-4 pt-2 border-t border-slate-100 dark:border-gray-800">
+          <div className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg bg-slate-50 dark:bg-gray-800">
+            <span className="inline-block w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: roleMeta.color }} />
+            <div className="min-w-0">
+              <p className="text-[12px] font-semibold text-gray-700 dark:text-gray-300 leading-none">{roleMeta.label}</p>
+              {roleMeta.scope !== 'own' && (
+                <p className="text-[10px] text-slate-400 dark:text-gray-500 mt-0.5">
+                  {roleMeta.scope === 'org' ? 'Org-wide access' :
+                   roleMeta.scope === 'hospital' ? 'Hospital scope' :
+                   roleMeta.scope === 'department' ? 'Department scope' : 'Full access'}
+                </p>
+              )}
+            </div>
           </div>
-          {roleMeta.scope !== 'own' && (
-            <p className="text-[10px] text-gray-400 dark:text-gray-600 mt-0.5 pl-4">
-              {roleMeta.scope === 'org' ? 'Org-wide' :
-               roleMeta.scope === 'hospital' ? 'Hospital scope' :
-               roleMeta.scope === 'department' ? 'Department scope' :
-               'Full access'}
-            </p>
-          )}
         </div>
       )}
     </aside>
   );
+}
+
+export default function AppSidebar(props: Props) {
+  return <AppSidebarInner {...props} />;
 }

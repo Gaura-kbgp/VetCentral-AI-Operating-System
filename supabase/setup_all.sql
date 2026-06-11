@@ -864,9 +864,11 @@ CREATE POLICY "sessions_own"           ON user_sessions           FOR ALL USING 
 
 DO $$
 DECLARE
-  v_org_id      UUID;
-  v_hospital_id UUID;
-  v_user_id     UUID;
+  v_org_id UUID;
+  v_h1     UUID;
+  v_h2     UUID;
+  v_h3     UUID;
+  v_user_id UUID;
 BEGIN
   -- Get the admin user's UUID from auth.users
   SELECT id INTO v_user_id FROM auth.users WHERE email = 'admin@vetclinic.com' LIMIT 1;
@@ -883,21 +885,29 @@ BEGIN
 
   SELECT id INTO v_org_id FROM organizations WHERE slug = 'vetclinic';
 
-  -- Create hospital (skip if exists)
-  INSERT INTO hospitals (org_id, name, slug, address, phone, timezone, color)
-  VALUES (v_org_id, 'Main Veterinary Hospital', 'main', '123 Vet Lane, New York, NY 10001', '+1 (555) 123-4567', 'America/New_York', '#2563EB')
-  ON CONFLICT (org_id, slug) DO NOTHING;
+  -- Create the 3 VetCentral hospitals (skip if exists)
+  INSERT INTO hospitals (org_id, name, slug, address, phone, email, website, timezone, color, description, is_active)
+  VALUES
+    (v_org_id, 'Town & Country Animal Hospital',              'town-country',  '1234 Main St, Reston, VA 20190',           '(703) 555-0101', 'info@tcah.com',              'https://tcah.com',              'America/New_York', '#2563EB', 'Full-service companion animal hospital in Reston.',              true),
+    (v_org_id, 'Animal Clinic of Clifton',                    'clifton',       '12900 Lee Hwy, Clifton, VA 20124',         '(703) 555-0202', 'info@cliftonvet.com',        'https://cliftonvet.com',        'America/New_York', '#7C3AED', 'Neighborhood clinic for dogs, cats, and exotic pets.',          true),
+    (v_org_id, 'Columbia Pike Animal Hospital & Emergency Center', 'columbia-pike', '6134 Columbia Pike, Falls Church, VA 22041', '(703) 555-0303', 'info@columbiapikevet.com', 'https://columbiapikevet.com', 'America/New_York', '#059669', '24/7 emergency and specialty veterinary hospital.',              true)
+  ON CONFLICT (org_id, slug) DO UPDATE SET name=EXCLUDED.name, color=EXCLUDED.color, is_active=EXCLUDED.is_active;
 
-  SELECT id INTO v_hospital_id FROM hospitals WHERE org_id = v_org_id AND slug = 'main';
+  SELECT id INTO v_h1 FROM hospitals WHERE org_id = v_org_id AND slug = 'town-country';
+  SELECT id INTO v_h2 FROM hospitals WHERE org_id = v_org_id AND slug = 'clifton';
+  SELECT id INTO v_h3 FROM hospitals WHERE org_id = v_org_id AND slug = 'columbia-pike';
 
   -- Create admin profile (skip if exists)
   INSERT INTO profiles (id, org_id, first_name, last_name, email, job_title, department, is_active)
   VALUES (v_user_id, v_org_id, 'Admin', 'User', 'admin@vetclinic.com', 'System Administrator', 'IT', TRUE)
   ON CONFLICT (id) DO NOTHING;
 
-  -- Assign super_admin role (skip if exists)
+  -- Assign super_admin role across all 3 hospitals (skip if exists)
   INSERT INTO user_hospital_roles (user_id, hospital_id, role)
-  VALUES (v_user_id, v_hospital_id, 'super_admin')
+  VALUES
+    (v_user_id, v_h1, 'super_admin'),
+    (v_user_id, v_h2, 'super_admin'),
+    (v_user_id, v_h3, 'super_admin')
   ON CONFLICT (user_id, hospital_id) DO NOTHING;
 
   -- Set org_id in auth user's app_metadata so RLS works
@@ -905,5 +915,5 @@ BEGIN
   SET raw_app_meta_data = COALESCE(raw_app_meta_data, '{}'::jsonb) || jsonb_build_object('org_id', v_org_id)
   WHERE id = v_user_id;
 
-  RAISE NOTICE 'Seed complete — org_id: %, hospital_id: %, user_id: %', v_org_id, v_hospital_id, v_user_id;
+  RAISE NOTICE 'Seed complete — org_id: %, user_id: %', v_org_id, v_user_id;
 END $$;

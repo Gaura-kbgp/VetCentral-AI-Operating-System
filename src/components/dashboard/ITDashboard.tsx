@@ -170,7 +170,7 @@ export default async function ITDashboard({ orgId, hospitalId, firstName }: Prop
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
         {/* 24h Action Summary */}
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
           <div className="px-5 py-4 border-b border-gray-100">
             <div className="flex items-center gap-2">
               <Activity className="h-4 w-4 text-indigo-600" />
@@ -208,7 +208,7 @@ export default async function ITDashboard({ orgId, hospitalId, firstName }: Prop
         </div>
 
         {/* Hospital Status */}
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
           <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
             <div className="flex items-center gap-2">
               <Globe className="h-4 w-4 text-blue-500" />
@@ -242,7 +242,7 @@ export default async function ITDashboard({ orgId, hospitalId, firstName }: Prop
         </div>
 
         {/* Security Events */}
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
           <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
             <div className="flex items-center gap-2">
               <Lock className="h-4 w-4 text-red-500" />
@@ -276,7 +276,7 @@ export default async function ITDashboard({ orgId, hospitalId, firstName }: Prop
       </div>
 
       {/* ── Live Audit Feed ──────────────────────────────────── */}
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
           <div className="flex items-center gap-2">
             <Terminal className="h-4 w-4 text-gray-500" />
@@ -325,7 +325,7 @@ export default async function ITDashboard({ orgId, hospitalId, firstName }: Prop
       </div>
 
       {/* ── Quick Actions ────────────────────────────────────── */}
-      <div className="rounded-xl border border-gray-200 bg-gray-50/60 p-5">
+      <div className="rounded-xl border border-slate-200/80 bg-white shadow-sm p-5">
         <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-3">IT Controls</p>
         <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
           {[

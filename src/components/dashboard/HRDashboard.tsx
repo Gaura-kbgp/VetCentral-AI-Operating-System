@@ -193,7 +193,7 @@ export default async function HRDashboard({ firstName, hospitalId }: Props) {
       )}
 
       {/* ── Onboarding Pipeline ──────────────────────────────── */}
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
           <div className="flex items-center gap-2">
             <Users className="h-4 w-4 text-pink-500" />
@@ -257,7 +257,7 @@ export default async function HRDashboard({ firstName, hospitalId }: Props) {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
         {/* New Hires */}
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
           <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
             <div className="flex items-center gap-2"><UserPlus className="h-4 w-4 text-green-500" /><h3 className="text-[14px] font-semibold text-gray-900">New Hires · Last 30 Days</h3></div>
             <Link href="/hr" className="text-[12px] text-blue-600 font-medium">Directory</Link>
@@ -285,7 +285,7 @@ export default async function HRDashboard({ firstName, hospitalId }: Props) {
         </div>
 
         {/* Expiring Certifications */}
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
           <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
             <div className="flex items-center gap-2"><Shield className="h-4 w-4 text-amber-500" /><h3 className="text-[14px] font-semibold text-gray-900">Expiring Certifications</h3></div>
             <Link href="/training" className="text-[12px] text-blue-600 font-medium">Training</Link>
@@ -311,7 +311,7 @@ export default async function HRDashboard({ firstName, hospitalId }: Props) {
       </div>
 
       {/* ── Quick Actions ────────────────────────────────────── */}
-      <div className="rounded-xl border border-gray-200 bg-gray-50/60 p-5">
+      <div className="rounded-xl border border-slate-200/80 bg-white shadow-sm p-5">
         <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-3">Quick Actions</p>
         <div className="flex flex-wrap gap-2">
           {[

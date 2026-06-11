@@ -221,7 +221,7 @@ export default async function HospitalAdminDashboard({ firstName, hospitalId }: 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
         {/* Active Projects */}
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
           <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
             <div className="flex items-center gap-2"><FolderOpen className="h-4 w-4 text-purple-500" /><h3 className="text-[14px] font-semibold text-gray-900">Active Projects</h3></div>
             <Link href="/projects" className="text-[12px] text-blue-600 font-medium">View all</Link>
@@ -256,7 +256,7 @@ export default async function HospitalAdminDashboard({ firstName, hospitalId }: 
         </div>
 
         {/* Upcoming Events */}
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
           <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
             <div className="flex items-center gap-2"><Calendar className="h-4 w-4 text-blue-500" /><h3 className="text-[14px] font-semibold text-gray-900">Upcoming Events</h3></div>
             <Link href="/calendar" className="text-[12px] text-blue-600 font-medium">Calendar</Link>
@@ -286,7 +286,7 @@ export default async function HospitalAdminDashboard({ firstName, hospitalId }: 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
         {/* Pending Requests */}
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
           <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
             <div className="flex items-center gap-2"><AlertCircle className="h-4 w-4 text-amber-500" /><h3 className="text-[14px] font-semibold text-gray-900">Pending Requests</h3></div>
             <Link href="/approvals" className="text-[12px] text-blue-600 font-medium">Approve</Link>
@@ -310,7 +310,7 @@ export default async function HospitalAdminDashboard({ firstName, hospitalId }: 
         </div>
 
         {/* Expiring Certifications */}
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
           <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
             <div className="flex items-center gap-2"><Shield className="h-4 w-4 text-red-500" /><h3 className="text-[14px] font-semibold text-gray-900">Expiring Certifications</h3></div>
             <Link href="/training" className="text-[12px] text-blue-600 font-medium">Training</Link>
@@ -341,7 +341,7 @@ export default async function HospitalAdminDashboard({ firstName, hospitalId }: 
       </div>
 
       {/* ── Quick Actions ────────────────────────────────────── */}
-      <div className="rounded-xl border border-gray-200 bg-gray-50/60 p-5">
+      <div className="rounded-xl border border-slate-200/80 bg-white shadow-sm p-5">
         <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-3">Quick Actions</p>
         <div className="flex flex-wrap gap-2">
           {[

@@ -332,8 +332,9 @@ export const ALL_NAV_ITEMS: NavItem[] = [
   { label: 'Training Academy',    href: '/training',        iconKey: 'GraduationCap',   section: 'core' },
   { label: 'Master Calendar',     href: '/calendar',        iconKey: 'Calendar',        section: 'core' },
   { label: 'My Tasks',            href: '/tasks',           iconKey: 'CheckSquare2',    section: 'core', permission: 'tasks:view' },
-  { label: 'Communications',      href: '/communication',   iconKey: 'MessageSquare',   section: 'core' },
-  { label: 'Requests',            href: '/workflows',       iconKey: 'Inbox',           section: 'core' },
+  { label: 'Announcements',       href: '/announcements',   iconKey: 'Megaphone',       section: 'core' },
+  { label: 'Messages',            href: '/messages',        iconKey: 'MessageSquare',   section: 'core' },
+  { label: 'My Requests',         href: '/requests-portal', iconKey: 'Inbox',           section: 'core' },
 
   // Role-gated core
   { label: 'Projects',            href: '/projects',        iconKey: 'FolderOpen',      section: 'core', permission: 'projects:view' },

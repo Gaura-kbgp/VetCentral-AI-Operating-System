@@ -34,8 +34,9 @@ export default async function TrainingPage() {
     <div className="flex flex-col h-full">
       <PageHeader
         title="Training Academy"
-        description="Complete your courses, track compliance, and earn certifications"
+        description="Learning management system for all hospital staff"
         color="orange"
+        variant="banner"
         icon={<GraduationCap className="h-7 w-7" />}
       />
       <LMSShell

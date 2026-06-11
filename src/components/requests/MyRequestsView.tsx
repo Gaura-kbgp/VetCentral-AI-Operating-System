@@ -5,8 +5,9 @@ import { useRouter } from 'next/navigation';
 import {
   Clock, CheckCircle, XCircle, AlertTriangle,
   Calendar, Plane, ShoppingCart, GraduationCap, FileText, Wrench,
-  Plus, ChevronRight, X,
+  Plus, ChevronRight, X, ClipboardList,
 } from 'lucide-react';
+import { PageHeader } from '@/components/ui/page-header';
 import { cn } from '@/lib/utils';
 import { cancelRequest } from '@/lib/actions/requests';
 import type { RequestSummary, RequestType, RequestStatus } from '@/lib/actions/requests';
@@ -148,22 +149,22 @@ export default function MyRequestsView({ requests }: Props) {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">My Requests</h1>
-          <p className="mt-0.5 text-sm text-gray-500 dark:text-gray-400">
-            Track and manage your submitted requests
-          </p>
-        </div>
-        <button
-          onClick={() => setDialogOpen(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors"
-        >
-          <Plus className="h-4 w-4" />
-          New Request
-        </button>
-      </div>
+      <PageHeader
+        title="My Requests"
+        description="Track and manage your submitted requests"
+        color="navy"
+        variant="banner"
+        icon={<ClipboardList className="h-7 w-7" />}
+        action={
+          <button
+            onClick={() => setDialogOpen(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-white/20 hover:bg-white/30 text-white rounded-lg text-sm font-medium transition-colors border border-white/20"
+          >
+            <Plus className="h-4 w-4" />
+            New Request
+          </button>
+        }
+      />
 
       {/* Stat chips */}
       <div className="flex flex-wrap gap-2">

@@ -42,8 +42,9 @@ export default async function CalendarPage() {
     <div className="h-full flex flex-col">
       <PageHeader
         title="Master Calendar"
-        description="Single source of truth for all hospital operations, meetings, training, and events"
+        description="Unified calendar across all three hospitals"
         color="navy"
+        variant="banner"
         icon={<Calendar className="h-7 w-7" />}
       />
       <MasterCalendarClient

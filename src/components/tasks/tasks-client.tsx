@@ -178,6 +178,7 @@ export default function TasksClient({ initialTasks, teamMembers, currentUserId }
         <TaskModal
           task={editTask}
           teamMembers={teamMembers}
+          tasks={tasks}
           onSubmit={editTask
             ? (data) => handleUpdate(editTask.id, data)
             : handleCreate

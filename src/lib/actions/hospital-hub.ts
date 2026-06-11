@@ -808,3 +808,196 @@ export async function getHospitalAnnouncements(hospitalId: string): Promise<Acti
     }),
   };
 }
+
+// ─────────────────────────────────────────────────────────────
+// Create Announcement
+// ─────────────────────────────────────────────────────────────
+
+export async function createHospitalAnnouncement(
+  hospitalId: string,
+  input: { title: string; content: string; priority: 'normal' | 'high' | 'urgent'; expires_at?: string | null },
+): Promise<ActionResult<{ id: string }>> {
+  const { admin, user, orgId } = await getCtx();
+  if (!user || !orgId) return { success: false, error: 'Unauthorized' };
+
+  if (!input.title?.trim()) return { success: false, error: 'Title is required' };
+
+  const { data, error } = await admin
+    .from('hospital_announcements')
+    .insert({
+      hospital_id: hospitalId,
+      org_id:      orgId,
+      title:       input.title.trim(),
+      content:     input.content?.trim() ?? '',
+      priority:    input.priority,
+      is_active:   true,
+      expires_at:  input.expires_at ?? null,
+      created_by:  user.id,
+    })
+    .select('id')
+    .single();
+
+  if (error) return { success: false, error: error.message };
+  return { success: true, data: { id: data.id } };
+}
+
+// ─────────────────────────────────────────────────────────────
+// Hospital Workspace (combined: snapshot + announcements + resources)
+// ─────────────────────────────────────────────────────────────
+
+export interface WorkspaceSnapshot {
+  staffCount: number;
+  documentCount: number;
+  projectCount: number;
+  departmentCount: number;
+  openRequestCount: number;
+  trainingDueCount: number;
+}
+
+export interface WorkspaceResource {
+  id: string;
+  title: string;
+  description: string | null;
+  categoryName: string | null;
+  categoryColor: string | null;
+  categoryIcon: string | null;
+}
+
+export interface HospitalWorkspaceData {
+  hospital: Hospital;
+  snapshot: WorkspaceSnapshot;
+  announcements: HospitalAnnouncement[];
+  resources: WorkspaceResource[];
+}
+
+export async function getHospitalWorkspaceData(
+  hospitalId: string,
+): Promise<ActionResult<HospitalWorkspaceData>> {
+  const { admin, user, orgId } = await getCtx();
+  if (!user || !orgId) return { success: false, error: 'Unauthorized' };
+
+  const now   = new Date().toISOString();
+  const in30d = new Date(Date.now() + 30 * 86_400_000).toISOString();
+
+  const [
+    hospRes,
+    staffRes,
+    deptRes,
+    projRes,
+    docRes,
+    reqRes,
+    dueEnrollRes,
+    announcementsRes,
+    resourcesRes,
+  ] = await Promise.all([
+    // Hospital info
+    admin.from('hospitals')
+      .select('id,name,slug,color,address,phone,email,website,timezone,description,is_active')
+      .eq('id', hospitalId)
+      .single(),
+    // Staff count
+    admin.from('user_hospital_roles')
+      .select('*', { count: 'exact', head: true })
+      .eq('hospital_id', hospitalId),
+    // Department count
+    admin.from('departments')
+      .select('*', { count: 'exact', head: true })
+      .eq('hospital_id', hospitalId)
+      .eq('is_active', true),
+    // Active project count
+    admin.from('projects')
+      .select('*', { count: 'exact', head: true })
+      .eq('hospital_id', hospitalId)
+      .not('status', 'in', '("completed","cancelled")'),
+    // Published KB document count
+    admin.from('knowledge_documents')
+      .select('*', { count: 'exact', head: true })
+      .eq('org_id', orgId)
+      .eq('status', 'published')
+      .or(`hospital_id.eq.${hospitalId},hospital_id.is.null`),
+    // Open schedule requests
+    admin.from('schedule_requests')
+      .select('*', { count: 'exact', head: true })
+      .eq('hospital_id', hospitalId)
+      .eq('status', 'pending'),
+    // Training due in next 30 days — per staff of this hospital
+    admin.from('user_course_enrollments')
+      .select('user_id', { count: 'exact', head: false })
+      .lte('due_date', in30d)
+      .gte('due_date', now)
+      .is('completed_at', null),
+    // Announcements
+    admin.from('hospital_announcements')
+      .select('id,title,content,priority,created_at,expires_at,created_by(first_name,last_name)')
+      .eq('hospital_id', hospitalId)
+      .eq('is_active', true)
+      .or(`expires_at.is.null,expires_at.gte.${now}`)
+      .order('created_at', { ascending: false })
+      .limit(10),
+    // Quick resources (KB docs)
+    admin.from('knowledge_documents')
+      .select(`
+        id, title, description,
+        category:category_id(name, color, icon)
+      `)
+      .eq('org_id', orgId)
+      .eq('status', 'published')
+      .or(`hospital_id.eq.${hospitalId},hospital_id.is.null`)
+      .order('view_count', { ascending: false })
+      .limit(8),
+  ]);
+
+  if (hospRes.error || !hospRes.data) {
+    return { success: false, error: hospRes.error?.message ?? 'Hospital not found' };
+  }
+
+  // Map due enrollments to hospital staff
+  const dueUserIds = [...new Set((dueEnrollRes.data ?? []).map((e: any) => e.user_id))];
+  let trainingDueCount = 0;
+  if (dueUserIds.length > 0) {
+    const { count } = await admin
+      .from('user_hospital_roles')
+      .select('*', { count: 'exact', head: true })
+      .eq('hospital_id', hospitalId)
+      .in('user_id', dueUserIds);
+    trainingDueCount = count ?? 0;
+  }
+
+  const announcements: HospitalAnnouncement[] = (announcementsRes.data ?? []).map((a: any) => {
+    const cb = Array.isArray(a.created_by) ? a.created_by[0] : a.created_by;
+    return {
+      id: a.id, title: a.title, content: a.content,
+      priority: a.priority, created_at: a.created_at, expires_at: a.expires_at,
+      createdBy: cb ? `${cb.first_name} ${cb.last_name}` : null,
+    };
+  });
+
+  const resources: WorkspaceResource[] = (resourcesRes.data ?? []).map((d: any) => {
+    const cat = Array.isArray(d.category) ? d.category[0] : d.category;
+    return {
+      id:            d.id,
+      title:         d.title,
+      description:   d.description ?? null,
+      categoryName:  cat?.name  ?? null,
+      categoryColor: cat?.color ?? null,
+      categoryIcon:  cat?.icon  ?? null,
+    };
+  });
+
+  return {
+    success: true,
+    data: {
+      hospital: hospRes.data as Hospital,
+      snapshot: {
+        staffCount:       staffRes.count    ?? 0,
+        departmentCount:  deptRes.count     ?? 0,
+        projectCount:     projRes.count     ?? 0,
+        documentCount:    docRes.count      ?? 0,
+        openRequestCount: reqRes.count      ?? 0,
+        trainingDueCount,
+      },
+      announcements,
+      resources,
+    },
+  };
+}

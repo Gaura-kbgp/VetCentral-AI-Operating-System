@@ -158,7 +158,7 @@ export default async function ManagerDashboard({ firstName, hospitalId }: Props)
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
         {/* Pending Approvals */}
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
           <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
             <div className="flex items-center gap-2">
               <AlertCircle className="h-4 w-4 text-amber-500" />
@@ -200,7 +200,7 @@ export default async function ManagerDashboard({ firstName, hospitalId }: Props)
         </div>
 
         {/* Active Projects */}
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+        <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
           <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
             <div className="flex items-center gap-2">
               <FolderOpen className="h-4 w-4 text-purple-500" />
@@ -239,7 +239,7 @@ export default async function ManagerDashboard({ firstName, hospitalId }: Props)
       </div>
 
       {/* ── Upcoming Events ─────────────────────────────────── */}
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
           <div className="flex items-center gap-2">
             <Calendar className="h-4 w-4 text-blue-500" />
@@ -263,7 +263,7 @@ export default async function ManagerDashboard({ firstName, hospitalId }: Props)
       </div>
 
       {/* ── Quick Actions ────────────────────────────────────── */}
-      <div className="rounded-xl border border-gray-200 bg-gray-50/60 p-5">
+      <div className="rounded-xl border border-slate-200/80 bg-white shadow-sm p-5">
         <p className="text-[10px] font-bold uppercase tracking-widest text-gray-400 mb-3">Quick Actions</p>
         <div className="flex flex-wrap gap-2">
           {[

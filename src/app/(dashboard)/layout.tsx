@@ -4,6 +4,7 @@ import { headers } from 'next/headers';
 import AppSidebar from '@/components/layout/AppSidebar';
 import TopNav from '@/components/layout/TopNav';
 import { PreferencesProvider } from '@/components/providers/preferences-provider';
+import { QueryProvider } from '@/components/providers/query-provider';
 import { getOrCreatePreferences } from '@/lib/actions/preferences';
 import type { AppRole } from '@/types/database';
 
@@ -80,7 +81,9 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // their onboarding journey until HR/manager marks it complete.
   // Admins are exempt — they manage onboarding and must access the dashboard freely.
   const ADMIN_EXEMPT_ROLES: AppRole[] = ['super_admin', 'org_admin', 'hospital_admin', 'practice_manager', 'hr'];
-  const isAdminExempt = highestRole != null && ADMIN_EXEMPT_ROLES.includes(highestRole);
+  // Users with no roles at all (e.g. a fresh super admin before seeding) are exempt —
+  // only regular staff with an assigned role can be gated into onboarding.
+  const isAdminExempt = highestRole == null || ADMIN_EXEMPT_ROLES.includes(highestRole);
 
   const headersList = await headers();
   const pathname    = headersList.get('x-pathname') ?? '';
@@ -101,6 +104,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // ───────────────────────────────────────────────────────────────────────────
 
   return (
+    <QueryProvider>
     <PreferencesProvider preferences={prefs}>
       <div className="flex h-screen overflow-hidden bg-background" suppressHydrationWarning>
         <AppSidebar role={highestRole} pendingRequestCount={pendingResult.count ?? 0} />
@@ -111,11 +115,12 @@ export default async function DashboardLayout({ children }: { children: React.Re
             hospitals={hospitalsResult.data ?? []}
             unreadCount={unreadResult.count ?? 0}
           />
-          <main className="flex-1 overflow-y-auto p-6 bg-background">
+          <main className="flex-1 overflow-hidden relative bg-slate-50/70 dark:bg-gray-950">
             {children}
           </main>
         </div>
       </div>
     </PreferencesProvider>
+    </QueryProvider>
   );
 }

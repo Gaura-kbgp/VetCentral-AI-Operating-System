@@ -2,6 +2,8 @@ import { createSupabaseServerClient, createSupabaseAdminClient } from '@/lib/sup
 import { redirect } from 'next/navigation';
 import { getOnboardingDashboard, getOnboardingTemplates, getOrgEmployees, getOrgProfiles } from '@/lib/actions/onboarding';
 import { OnboardingDashboard } from '@/components/onboarding/onboarding-dashboard';
+import { PageHeader } from '@/components/ui/page-header';
+import { UserPlus } from 'lucide-react';
 
 export const metadata = { title: 'Employee Onboarding — VetOS' };
 
@@ -33,6 +35,14 @@ export default async function OnboardingPage() {
   const canStartOnboarding = allRoles.includes('hr');
 
   return (
+    <div className="flex flex-col h-full min-h-0">
+    <PageHeader
+      title="Employee Onboarding"
+      description="Standardized onboarding workflow for new employees"
+      color="green"
+      variant="banner"
+      icon={<UserPlus className="h-7 w-7" />}
+    />
     <OnboardingDashboard
       stats={dashRes.success ? dashRes.data.stats : null}
       records={dashRes.success ? dashRes.data.records : []}
@@ -43,5 +53,6 @@ export default async function OnboardingPage() {
       isAdmin={isAdmin}
       canStartOnboarding={canStartOnboarding}
     />
+    </div>
   );
 }

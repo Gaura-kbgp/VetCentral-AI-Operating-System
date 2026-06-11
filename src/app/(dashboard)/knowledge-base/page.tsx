@@ -23,8 +23,9 @@ export default async function KnowledgeBasePage() {
     <div className="flex flex-col h-full min-h-0">
       <PageHeader
         title="Knowledge Base"
-        description="SOPs, policies, training materials, and internal documentation"
-        color="indigo"
+        description="Single source of truth for all hospital documentation"
+        color="navy"
+        variant="banner"
         icon={<BookOpen className="h-7 w-7" />}
       />
       <KBShell

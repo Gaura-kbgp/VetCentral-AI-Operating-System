@@ -167,6 +167,40 @@ export async function getChannels(): Promise<ActionResult<Channel[]>> {
   return { success: true, data: (data ?? []) as Channel[] };
 }
 
+// ── Departments + hospitals for channel creation UI ───────
+export async function getCommunicationSetupData(): Promise<ActionResult<{
+  departments: Array<{ id: string; name: string }>;
+  hospitals: Array<{ id: string; name: string }>;
+}>> {
+  const { user, orgId } = await getUserContext();
+  if (!user || !orgId) return { success: false, error: 'Unauthorized' };
+
+  const admin = createSupabaseAdminClient();
+
+  const [deptRes, hospRes] = await Promise.all([
+    admin
+      .from('departments')
+      .select('id,name')
+      .eq('org_id', orgId)
+      .eq('is_active', true)
+      .order('name'),
+    admin
+      .from('hospitals')
+      .select('id,name')
+      .eq('org_id', orgId)
+      .eq('is_active', true)
+      .order('name'),
+  ]);
+
+  return {
+    success: true,
+    data: {
+      departments: (deptRes.data ?? []) as Array<{ id: string; name: string }>,
+      hospitals:   (hospRes.data ?? []) as Array<{ id: string; name: string }>,
+    },
+  };
+}
+
 // ── Create channel ────────────────────────────────────────
 export async function createChannel(
   name: string,

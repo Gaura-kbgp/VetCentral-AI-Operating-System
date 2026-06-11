@@ -35,8 +35,9 @@ export default async function AIAssistantPage() {
     <div className="flex flex-col h-full min-h-0">
       <PageHeader
         title="AI Assistant"
-        description="Ask anything from your internal knowledge base — SOPs, policies, training materials and more"
-        color="violet"
+        description="Ask questions about procedures, policies, training, and more"
+        color="navy"
+        variant="banner"
         icon={<Sparkles className="h-7 w-7" />}
       />
       <AIShell

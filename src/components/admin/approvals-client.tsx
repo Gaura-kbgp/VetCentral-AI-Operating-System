@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useTransition } from 'react';
-import { useRouter } from 'next/navigation';
 import {
   Clock, AlertTriangle, TrendingUp, CheckCircle2,
   User, ChevronDown, ChevronUp, Loader2, CheckCheck, XCircle,
@@ -66,8 +65,7 @@ const TYPE_LABELS: Record<RequestType, string> = {
 
 type Tab = 'pending' | 'escalated' | 'all';
 
-export function ApprovalsClient({ requests, currentUserId }: { requests: RequestRow[]; currentUserId: string }) {
-  const router = useRouter();
+export function ApprovalsClient({ requests, currentUserId, onActionComplete }: { requests: RequestRow[]; currentUserId: string; onActionComplete?: () => void }) {
   const [tab, setTab]           = useState<Tab>('pending');
   const [expanded, setExpanded] = useState<string | null>(null);
   const [rejectId, setRejectId] = useState<string | null>(null);
@@ -91,7 +89,7 @@ export function ApprovalsClient({ requests, currentUserId }: { requests: Request
     setActingId(id);
     start(async () => {
       const res = await approveRequest(id);
-      if (res.success) { toast.success('Request approved'); router.refresh(); }
+      if (res.success) { toast.success('Request approved'); onActionComplete?.(); }
       else             { toast.error(res.error); }
       setActingId(null);
     });
@@ -102,7 +100,7 @@ export function ApprovalsClient({ requests, currentUserId }: { requests: Request
     setActingId(id);
     start(async () => {
       const res = await rejectRequest(id, reason.trim());
-      if (res.success) { toast.success('Request rejected'); setRejectId(null); setReason(''); router.refresh(); }
+      if (res.success) { toast.success('Request rejected'); setRejectId(null); setReason(''); onActionComplete?.(); }
       else             { toast.error(res.error); }
       setActingId(null);
     });
@@ -112,7 +110,7 @@ export function ApprovalsClient({ requests, currentUserId }: { requests: Request
     setActingId(id);
     start(async () => {
       const res = await escalateRequest(id, 'Escalated by admin for senior review');
-      if (res.success) { toast.success('Request escalated'); router.refresh(); }
+      if (res.success) { toast.success('Request escalated'); onActionComplete?.(); }
       else             { toast.error(res.error); }
       setActingId(null);
     });

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Inter, Plus_Jakarta_Sans } from "next/font/google";
+import Script from "next/script";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/components/providers/theme-provider";
@@ -36,9 +37,9 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <head>
-        {/* Blocking theme script — runs before paint, preventing FOUC.
-            Must live in <head> so Next.js does not hydrate it as a React child. */}
-        <script
+        <Script
+          id="theme-init"
+          strategy="beforeInteractive"
           dangerouslySetInnerHTML={{
             __html: `(function(){try{var t=localStorage.getItem('vetos-theme');if(t==='dark'){document.documentElement.classList.add('dark')}else if(t==='system'||!t){if(window.matchMedia('(prefers-color-scheme: dark)').matches){document.documentElement.classList.add('dark')}}}catch(e){}})()`
           }}

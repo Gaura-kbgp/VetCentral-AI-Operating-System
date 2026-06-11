@@ -173,3 +173,31 @@ export async function toggleHospitalStatus(id: string, isActive: boolean): Promi
   revalidatePath('/admin/hospitals');
   return { success: true, data };
 }
+
+export async function deleteHospital(id: string): Promise<ActionResult> {
+  const ctx = await getAdminCtx();
+  if (!ctx.ok) return { success: false, error: ctx.error };
+  const { adminClient, orgId, user } = ctx;
+
+  const { data: hospital } = await adminClient
+    .from('hospitals').select('name').eq('id', id).eq('org_id', orgId).single();
+  if (!hospital) return { success: false, error: 'Hospital not found' };
+
+  const { error } = await adminClient
+    .from('hospitals').delete().eq('id', id).eq('org_id', orgId);
+
+  if (error) return { success: false, error: error.message };
+
+  await adminClient.from('audit_logs').insert({
+    org_id:        orgId,
+    user_id:       user.id,
+    action:        'delete',
+    resource_type: 'hospital',
+    resource_id:   id,
+    old_data:      hospital,
+    new_data:      null,
+  }).catch(() => {});
+
+  revalidatePath('/admin/hospitals');
+  return { success: true, data: {} };
+}

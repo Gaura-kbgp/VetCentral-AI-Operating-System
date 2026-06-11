@@ -34,12 +34,19 @@ export default async function EmployeeOnboardingPage({
     admin.from('org_user_roles').select('role').eq('user_id', user.id),
   ]);
 
-  if (!recordRes.success) notFound();
-
   const allRoles = [
     ...(hospRolesRes.data ?? []).map(r => r.role),
     ...(orgRolesRes.data ?? []).map(r => r.role),
   ];
+
+  if (!recordRes.success) {
+    // No onboarding record — redirect admins (and users with no roles) to dashboard
+    if (allRoles.some(r => ADMIN_ROLES.includes(r)) || allRoles.length === 0) {
+      redirect('/dashboard');
+    }
+    notFound();
+  }
+
   const isAdmin = allRoles.some(r => ADMIN_ROLES.includes(r));
   const isOwnRecord = user.id === recordRes.data.employee_id;
 

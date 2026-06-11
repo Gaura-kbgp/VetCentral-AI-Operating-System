@@ -496,7 +496,7 @@ export async function approveRequest(
 
     if (reqErr || !request) return { success: false, error: 'Request not found' };
     if (request.status !== 'pending' && request.status !== 'escalated') {
-      return { success: false, error: 'Request is not pending approval' };
+      return { success: false, error: `Request cannot be approved (current status: ${request.status})` };
     }
 
     const { error } = await admin
@@ -843,6 +843,45 @@ export async function getRecentlyCompleted(limit = 20): Promise<ActionResult<Req
 
     if (error) return { success: false, error: error.message };
     return { success: true, data: (data || []) as unknown as RequestSummary[] };
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : 'Unknown error' };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────
+// Approvals Center Data (admin-only, uses admin client)
+// ─────────────────────────────────────────────────────────────
+
+export interface ApprovalRow extends RequestSummary {
+  requester: { first_name: string | null; last_name: string | null; email: string | null; avatar_url: string | null } | null;
+}
+
+export async function getApprovalsData(): Promise<ActionResult<ApprovalRow[]>> {
+  const { admin, user, orgId, isAdmin } = await getCtx();
+  if (!user || !orgId) return { success: false, error: 'Unauthorized' };
+  if (!isAdmin) return { success: false, error: 'Forbidden' };
+
+  try {
+    const { data, error } = await admin
+      .from('requests')
+      .select(`
+        id, request_type, status, priority, title, description,
+        requested_by, created_at, updated_at, due_date,
+        approved_at, rejected_at, rejection_reason, escalation_reason,
+        requester:profiles!requested_by(first_name, last_name, email, avatar_url)
+      `)
+      .eq('org_id', orgId)
+      .order('created_at', { ascending: false })
+      .limit(200);
+
+    if (error) return { success: false, error: error.message };
+
+    const rows = (data ?? []).map(r => ({
+      ...r,
+      requester: Array.isArray(r.requester) ? (r.requester[0] ?? null) : r.requester,
+    })) as ApprovalRow[];
+
+    return { success: true, data: rows };
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : 'Unknown error' };
   }

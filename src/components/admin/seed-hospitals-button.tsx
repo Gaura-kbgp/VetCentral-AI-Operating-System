@@ -18,7 +18,7 @@ export function SeedHospitalsButton({ hospitalCount, target }: Props) {
   const isComplete = count >= target;
 
   const handleSeed = async () => {
-    if (!confirm('This will create 3 demo hospitals with departments, calendar events, and channels. Continue?')) return;
+    if (!confirm('This will seed the 3 VetCentral hospitals with departments, calendar events, and channels. Continue?')) return;
     setStatus('loading');
     setMessage('');
     try {
@@ -43,7 +43,7 @@ export function SeedHospitalsButton({ hospitalCount, target }: Props) {
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-sm text-slate-600">Demo Hospitals</p>
+          <p className="text-sm text-slate-600">VetCentral Hospitals</p>
           <p className="text-xs text-slate-400 mt-0.5">{count} in database · {target} defined</p>
         </div>
         {isComplete ? (
