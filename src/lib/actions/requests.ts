@@ -705,6 +705,7 @@ export async function getMyRequests(
       .from('requests')
       .select('id,request_type,status,priority,title,description,requested_by,created_at,updated_at,due_date,approved_at,rejected_at,rejection_reason,escalation_reason')
       .eq('requested_by', user.id)
+      .neq('request_type', 'direct')
       .order('created_at', { ascending: false })
       .limit(100);
 

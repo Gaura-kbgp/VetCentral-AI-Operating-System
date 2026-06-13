@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useTransition, useRef } from 'react';
-import { X, Tag, Loader2, Archive, Globe, Building2, Lock, Upload, FileText, FileSpreadsheet, File } from 'lucide-react';
+import { X, Tag, Loader2, Archive, Globe, Building2, Lock, Upload, FileText, FileSpreadsheet, File, CheckCircle2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
@@ -250,72 +250,100 @@ export function KBDocumentModal({
             />
           </div>
 
-          {/* Category + Status + Visibility row */}
-          <div className="grid grid-cols-3 gap-3">
-            <div className="space-y-1">
-              <Label className="text-xs font-medium text-slate-600">Category</Label>
-              {(() => {
-                const selectedCat = categories.find(c => c.id === categoryId);
-                return (
-                  <Select
-                    value={categoryId ?? ''}
-                    onValueChange={v => setCategoryId(v === '__none__' ? null : v || null)}
-                  >
-                    <SelectTrigger className="h-8 text-xs w-full">
-                      {selectedCat ? (
-                        <span className="flex items-center gap-1.5">
-                          <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: selectedCat.color }} />
-                          {selectedCat.name}
-                        </span>
-                      ) : (
-                        <SelectValue placeholder="Select category" />
+          {/* Category — visual pill grid */}
+          <div className="space-y-2">
+            <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Category</Label>
+            {categories.length === 0 ? (
+              <p className="text-xs text-slate-400 italic">Loading categories…</p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {/* None option */}
+                <button
+                  type="button"
+                  onClick={() => setCategoryId(null)}
+                  className={cn(
+                    'flex items-center gap-2 px-3 py-1.5 rounded-xl border text-[12px] font-semibold transition-all',
+                    categoryId === null
+                      ? 'bg-slate-700 text-white border-slate-700 shadow-sm'
+                      : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300 hover:text-slate-700'
+                  )}
+                >
+                  {categoryId === null && <CheckCircle2 className="h-3 w-3 text-white/80" />}
+                  None
+                </button>
+
+                {categories.map(cat => {
+                  const isSelected = categoryId === cat.id;
+                  return (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      onClick={() => setCategoryId(cat.id)}
+                      className={cn(
+                        'flex items-center gap-2 px-3 py-1.5 rounded-xl border text-[12px] font-semibold transition-all',
+                        isSelected
+                          ? 'text-white border-transparent shadow-sm'
+                          : 'bg-white text-slate-700 border-slate-200 hover:border-slate-300'
                       )}
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none__">
-                        <span className="text-slate-400">No category</span>
-                      </SelectItem>
-                      {categories.map(c => (
-                        <SelectItem key={c.id} value={c.id}>
-                          <span className="flex items-center gap-1.5">
-                            <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: c.color }} />
-                            {c.name}
-                          </span>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                );
-              })()}
+                      style={isSelected ? { backgroundColor: cat.color, borderColor: cat.color } : {}}
+                    >
+                      <span
+                        className="w-2 h-2 rounded-full shrink-0"
+                        style={{ backgroundColor: isSelected ? 'rgba(255,255,255,0.7)' : cat.color }}
+                      />
+                      {isSelected && <CheckCircle2 className="h-3 w-3 text-white/80" />}
+                      {cat.name}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Status + Visibility row */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Status</Label>
+              <div className="flex gap-2">
+                {(['draft', 'published'] as KBDocStatus[]).map(s => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => setStatus(s)}
+                    className={cn(
+                      'flex-1 py-2 rounded-xl border text-[12px] font-semibold transition-all capitalize',
+                      status === s
+                        ? s === 'published'
+                          ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm'
+                          : 'bg-amber-500 text-white border-amber-500 shadow-sm'
+                        : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300 hover:text-slate-700'
+                    )}
+                  >
+                    {s === 'published' ? '✓ Published' : '✎ Draft'}
+                  </button>
+                ))}
+              </div>
             </div>
 
-            <div className="space-y-1">
-              <Label className="text-xs font-medium text-slate-600">Status</Label>
-              <Select value={status} onValueChange={v => setStatus(v as KBDocStatus)}>
-                <SelectTrigger className="h-8 text-xs w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="draft">Draft</SelectItem>
-                  <SelectItem value="published">Published</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-1">
-              <Label className="text-xs font-medium text-slate-600">Visibility</Label>
-              <Select value={visibility} onValueChange={v => setVisibility(v as KBVisibility)}>
-                <SelectTrigger className="h-8 text-xs w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {VISIBILITY_OPTIONS.map(o => (
-                    <SelectItem key={o.value} value={o.value}>
-                      <span className="flex items-center gap-1.5">{o.icon}{o.label}</span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Visibility</Label>
+              <div className="flex gap-2">
+                {VISIBILITY_OPTIONS.map(o => (
+                  <button
+                    key={o.value}
+                    type="button"
+                    onClick={() => setVisibility(o.value)}
+                    className={cn(
+                      'flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl border text-[11px] font-semibold transition-all',
+                      visibility === o.value
+                        ? 'bg-[#1e3a5f] text-white border-[#1e3a5f] shadow-sm'
+                        : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300 hover:text-slate-700'
+                    )}
+                  >
+                    {o.icon}{o.label.split(' ')[0]}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
 

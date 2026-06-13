@@ -3,8 +3,11 @@
 import { revalidatePath } from 'next/cache';
 import { createSupabaseServerClient, createSupabaseAdminClient } from '@/lib/supabase/server';
 import type { AppRole } from '@/types/database';
+import { canActorManageTarget } from '@/lib/role-utils';
 
 const ADMIN_ROLES: AppRole[] = ['super_admin', 'org_admin', 'hospital_admin', 'it_admin'];
+
+const HR_MANAGE_ROLES = ['super_admin', 'org_admin', 'hospital_admin', 'practice_manager', 'hr'];
 
 async function getCallerAndCheck() {
   const supabase = await createSupabaseServerClient();
@@ -103,4 +106,75 @@ export async function setUserActive(
 
   revalidatePath('/admin/users');
   return { success: true };
+}
+
+// ── Permission-aware delete / activate ───────────────────────
+
+async function getActorRoles(userId: string): Promise<string[]> {
+  const admin = createSupabaseAdminClient();
+  const { data } = await admin.from('user_hospital_roles').select('role').eq('user_id', userId);
+  return (data ?? []).map(r => r.role as string);
+}
+
+export async function deleteUserProfile(
+  targetUserId: string,
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const supabase = await createSupabaseServerClient();
+    const admin    = createSupabaseAdminClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: 'Unauthorized' };
+    if (user.id === targetUserId) return { success: false, error: 'You cannot delete your own account' };
+
+    const [actorRoles, targetRoles] = await Promise.all([
+      getActorRoles(user.id),
+      getActorRoles(targetUserId),
+    ]);
+
+    if (!actorRoles.some(r => HR_MANAGE_ROLES.includes(r)))
+      return { success: false, error: 'Access denied' };
+    if (!canActorManageTarget(actorRoles, targetRoles))
+      return { success: false, error: 'Cannot delete a user with equal or higher permissions' };
+
+    const { error } = await admin.auth.admin.deleteUser(targetUserId);
+    if (error) return { success: false, error: error.message };
+
+    revalidatePath('/admin/users');
+    revalidatePath('/hr');
+    revalidatePath('/onboarding');
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : 'Error' };
+  }
+}
+
+export async function setUserActiveManaged(
+  targetUserId: string,
+  isActive:     boolean,
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const supabase = await createSupabaseServerClient();
+    const admin    = createSupabaseAdminClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: 'Unauthorized' };
+    if (user.id === targetUserId) return { success: false, error: 'You cannot change your own status' };
+
+    const [actorRoles, targetRoles] = await Promise.all([
+      getActorRoles(user.id),
+      getActorRoles(targetUserId),
+    ]);
+
+    if (!actorRoles.some(r => HR_MANAGE_ROLES.includes(r)))
+      return { success: false, error: 'Access denied' };
+    if (!canActorManageTarget(actorRoles, targetRoles))
+      return { success: false, error: 'Insufficient permissions' };
+
+    const { error } = await admin.from('profiles').update({ is_active: isActive }).eq('id', targetUserId);
+    if (error) return { success: false, error: error.message };
+
+    revalidatePath('/admin/users');
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : 'Error' };
+  }
 }

@@ -677,16 +677,20 @@ interface HubShellProps {
   userId: string;
   viewRole: ViewRole;
   userRoles: string[];
+  initialSelectedId?: string;
 }
 
-export function HubShell({ hospitals: initialHospitals, userId, viewRole, userRoles }: HubShellProps) {
+export function HubShell({ hospitals: initialHospitals, userId, viewRole, userRoles, initialSelectedId }: HubShellProps) {
   const navigate     = useAppStore(s => s.navigate);
   const queryClient  = useQueryClient();
   const canPost      = userRoles.some(r => POSTER_ROLES.includes(r));
   const isSuperAdmin = userRoles.includes('super_admin');
 
   const [hospitals,   setHospitals]   = useState<HospitalCard[]>(initialHospitals);
-  const [selectedId,  setSelectedId]  = useState<string>(initialHospitals[0]?.id ?? '');
+  const defaultId = initialSelectedId && initialHospitals.some(h => h.id === initialSelectedId)
+    ? initialSelectedId
+    : (initialHospitals[0]?.id ?? '');
+  const [selectedId,  setSelectedId]  = useState<string>(defaultId);
   const [showAddForm, setShowAddForm] = useState(false);
 
   const { data, isLoading } = useQuery({

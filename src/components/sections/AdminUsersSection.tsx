@@ -57,7 +57,7 @@ export function AdminUsersSection({ userId }: SectionProps) {
         }),
       }));
 
-      return { users, hospitals: hospitalsResult.data ?? [], hasAccess: true };
+      return { users, hospitals: hospitalsResult.data ?? [], hasAccess: true, currentRole };
     },
   });
 
@@ -75,7 +75,12 @@ export function AdminUsersSection({ userId }: SectionProps) {
         variant="banner"
         icon={<Users className="h-7 w-7" />}
       />
-      <UsersAdmin users={data.users} hospitals={data.hospitals} currentUserId={userId} />
+      <UsersAdmin
+        users={data.users}
+        hospitals={data.hospitals}
+        currentUserId={userId}
+        currentUserRole={data.currentRole}
+      />
     </div>
   );
 }

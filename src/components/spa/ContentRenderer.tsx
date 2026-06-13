@@ -35,11 +35,12 @@ import { HelpSection             } from '@/components/sections/HelpSection';
 import { PreferencesSection      } from '@/components/sections/PreferencesSection';
 import { SecuritySection         } from '@/components/sections/SecuritySection';
 import { AISettingsSection       } from '@/components/sections/AISettingsSection';
+import { CommunicationSection    } from '@/components/sections/CommunicationSection';
 import type { SectionProps } from '@/components/sections/types';
 
 type SectionComponentType = React.ComponentType<SectionProps>;
 
-const SECTION_REGISTRY: Array<{ key: SectionKey; Component: SectionComponentType }> = [
+const SECTION_REGISTRY: Array<{ key: SectionKey; Component: SectionComponentType; fullHeight?: boolean }> = [
   { key: 'ai-assistant',         Component: AIAssistantSection      },
   { key: 'knowledge-base',       Component: KnowledgeBaseSection    },
   { key: 'training',             Component: TrainingSection         },
@@ -70,6 +71,7 @@ const SECTION_REGISTRY: Array<{ key: SectionKey; Component: SectionComponentType
   { key: 'settings-preferences', Component: PreferencesSection      },
   { key: 'settings-security',    Component: SecuritySection         },
   { key: 'settings-ai',          Component: AISettingsSection       },
+  { key: 'communication',        Component: CommunicationSection,    fullHeight: true },
 ];
 
 const ALL_SECTION_KEYS = new Set<SectionKey>(
@@ -118,15 +120,19 @@ const MemoSection = memo(function MemoSection({
 });
 
 // CSS show/hide — never unmounts, preserves scroll + state
-function SectionShell({ sectionKey, active, children }: {
+function SectionShell({ sectionKey, active, fullHeight, children }: {
   sectionKey: string;
   active: boolean;
+  fullHeight?: boolean;
   children: React.ReactNode;
 }) {
   return (
     <div
       data-section={sectionKey}
-      className="absolute inset-0 overflow-y-auto flex flex-col p-6"
+      className={fullHeight
+        ? 'absolute inset-0 overflow-hidden flex flex-col p-4'
+        : 'absolute inset-0 overflow-y-auto flex flex-col p-6'
+      }
       style={{ display: active ? 'flex' : 'none' }}
     >
       {children}
@@ -163,8 +169,8 @@ export function ContentRenderer({
         <StableDashboard>{children}</StableDashboard>
       </SectionShell>
 
-      {SECTION_REGISTRY.map(({ key, Component }) => (
-        <SectionShell key={key} sectionKey={key} active={activeSection === key}>
+      {SECTION_REGISTRY.map(({ key, Component, fullHeight }) => (
+        <SectionShell key={key} sectionKey={key} active={activeSection === key} fullHeight={fullHeight}>
           <MemoSection
             Component={Component}
             sectionKey={key}

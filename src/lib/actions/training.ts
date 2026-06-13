@@ -75,8 +75,9 @@ export interface QuizQuestion {
   id: string;
   quiz_id: string;
   question_text: string;
-  question_type: 'multiple_choice' | 'true_false';
+  question_type: 'multiple_choice' | 'true_false' | 'fill_in_blank' | 'essay';
   options: QuizOption[];
+  correct_answer: string | null;   // used by fill_in_blank
   explanation: string | null;
   points: number;
   sort_order: number;
@@ -242,15 +243,23 @@ export async function getMyLearningData(): Promise<ActionResult<{
   ]);
 
   const enrolledCourseIds = (enrollRes.data ?? []).map((e: any) => e.course_id);
-  const { data: coursesData } = enrolledCourseIds.length
-    ? await supabase
-        .from('training_courses')
-        .select('*, module_count:training_modules(count)')
-        .in('id', enrolledCourseIds)
-    : { data: [] };
+  // fetch all published org courses (catalog) + any enrolled course (even if unpublished since)
+  const [pubRes, enrolledRes] = await Promise.all([
+    supabase
+      .from('training_courses')
+      .select('*, module_count:training_modules(count)')
+      .eq('org_id', orgId)
+      .eq('is_published', true),
+    enrolledCourseIds.length
+      ? supabase
+          .from('training_courses')
+          .select('*, module_count:training_modules(count)')
+          .in('id', enrolledCourseIds)
+      : Promise.resolve({ data: [] as any[] }),
+  ]);
 
   const coursesMap: Record<string, LMSCourse> = {};
-  for (const c of coursesData ?? []) {
+  for (const c of [...(pubRes.data ?? []), ...(enrolledRes.data ?? [])]) {
     coursesMap[c.id] = {
       ...c,
       module_count: Array.isArray(c.module_count) ? (c.module_count[0] as any)?.count ?? 0 : 0,
@@ -312,26 +321,33 @@ export async function getCourseForViewing(courseId: string): Promise<ActionResul
 
   if (courseRes.error) return { success: false, error: courseRes.error.message };
 
-  const { data: modulesData } = await supabase
-    .from('training_modules')
-    .select('*')
-    .eq('course_id', courseId)
-    .order('sort_order', { ascending: true });
+  const [modulesRes, questionsRes] = await Promise.all([
+    supabase.from('training_modules').select('*').eq('course_id', courseId).order('sort_order', { ascending: true }),
+    quizRes.data
+      ? supabase.from('quiz_questions').select('*').eq('quiz_id', quizRes.data.id).order('sort_order', { ascending: true })
+      : Promise.resolve({ data: [] }),
+  ]);
 
   const progressMap: Record<string, any> = {};
   for (const p of moduleProgressRes.data ?? []) progressMap[p.module_id] = p;
 
-  const modules: LMSModule[] = (modulesData ?? []).map(m => ({
+  const modules: LMSModule[] = (modulesRes.data ?? []).map(m => ({
     ...m,
     progress: progressMap[m.id] ?? null,
   }));
+
+  // only attach quiz if it actually has questions
+  const questions = questionsRes.data ?? [];
+  const quiz = quizRes.data && questions.length > 0
+    ? { ...quizRes.data, questions }
+    : null;
 
   return {
     success: true,
     data: {
       ...courseRes.data,
       modules,
-      quiz: quizRes.data ?? null,
+      quiz,
       enrollment: enrollRes.data ?? null,
     } as LMSCourse,
   };
@@ -378,7 +394,7 @@ export async function updateModuleProgress(
   moduleId: string,
   courseId: string,
   timeSecs: number,
-): Promise<ActionResult> {
+): Promise<ActionResult<{ pct: number }>> {
   const { supabase, user } = await getUser();
   if (!user) return { success: false, error: 'Unauthorized' };
 
@@ -389,11 +405,19 @@ export async function updateModuleProgress(
       { onConflict: 'user_id,module_id' }
     );
 
+  const { data: courseModules } = await supabase
+    .from('training_modules')
+    .select('id')
+    .eq('course_id', courseId);
+  const moduleIds = (courseModules ?? []).map(m => m.id);
+
   const [{ count: totalCount }, { count: doneCount }] = await Promise.all([
     supabase.from('training_modules').select('*', { count: 'exact', head: true }).eq('course_id', courseId),
-    supabase.from('user_module_progress').select('*', { count: 'exact', head: true })
-      .eq('user_id', user.id).not('completed_at', 'is', null)
-      .in('module_id', supabase.from('training_modules').select('id').eq('course_id', courseId) as any),
+    moduleIds.length > 0
+      ? supabase.from('user_module_progress').select('*', { count: 'exact', head: true })
+          .eq('user_id', user.id).not('completed_at', 'is', null)
+          .in('module_id', moduleIds)
+      : Promise.resolve({ count: 0, data: null, error: null }),
   ]);
 
   const total = totalCount ?? 0;
@@ -409,7 +433,27 @@ export async function updateModuleProgress(
     .eq('user_id', user.id)
     .eq('course_id', courseId);
 
-  return { success: true, data: undefined };
+  // auto-issue certificate if course has no quiz OR quiz has 0 questions
+  if (pct === 100) {
+    const { data: quizDef } = await supabase
+      .from('quiz_definitions')
+      .select('id')
+      .eq('course_id', courseId)
+      .maybeSingle();
+    let hasRealQuiz = false;
+    if (quizDef?.id) {
+      const { count: qCount } = await supabase
+        .from('quiz_questions')
+        .select('*', { count: 'exact', head: true })
+        .eq('quiz_id', quizDef.id);
+      hasRealQuiz = (qCount ?? 0) > 0;
+    }
+    if (!hasRealQuiz) {
+      await issueCertificate(courseId);
+    }
+  }
+
+  return { success: true, data: { pct } };
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -483,7 +527,7 @@ export async function submitQuizAttempt(
 
   const { data: questions } = await supabase
     .from('quiz_questions')
-    .select('id, options, points')
+    .select('id, question_type, options, correct_answer, points')
     .eq('quiz_id', quizId);
 
   let totalPoints = 0;
@@ -491,11 +535,24 @@ export async function submitQuizAttempt(
 
   for (const q of questions ?? []) {
     totalPoints += q.points;
-    const selectedOptionId = answers[q.id];
-    if (selectedOptionId) {
-      const options = q.options as QuizOption[];
-      const selected = options.find(o => o.id === selectedOptionId);
-      if (selected?.is_correct) earnedPoints += q.points;
+    const userAnswer = answers[q.id];
+
+    if (q.question_type === 'essay') {
+      // Essay always awards full points
+      earnedPoints += q.points;
+    } else if (q.question_type === 'fill_in_blank') {
+      // Case-insensitive text match against correct_answer
+      if (userAnswer && q.correct_answer &&
+          userAnswer.trim().toLowerCase() === (q.correct_answer as string).trim().toLowerCase()) {
+        earnedPoints += q.points;
+      }
+    } else {
+      // multiple_choice / true_false — option ID match
+      if (userAnswer) {
+        const options = q.options as QuizOption[];
+        const selected = options.find(o => o.id === userAnswer);
+        if (selected?.is_correct) earnedPoints += q.points;
+      }
     }
   }
 
@@ -529,10 +586,11 @@ export async function submitQuizAttempt(
 // ─────────────────────────────────────────────────────────────
 
 async function issueCertificate(courseId: string) {
-  const { supabase, user } = await getUser();
+  const { user } = await getUser();
   if (!user) return;
+  const admin = createSupabaseAdminClient();
 
-  const { data: existing } = await supabase
+  const { data: existing } = await admin
     .from('training_certificates')
     .select('id')
     .eq('user_id', user.id)
@@ -541,7 +599,7 @@ async function issueCertificate(courseId: string) {
 
   if (existing) return;
 
-  const { data: course } = await supabase
+  const { data: course } = await admin
     .from('training_courses')
     .select('expires_after_days')
     .eq('id', courseId)
@@ -554,7 +612,7 @@ async function issueCertificate(courseId: string) {
     expiresAt = d.toISOString();
   }
 
-  await supabase.from('training_certificates').upsert(
+  await admin.from('training_certificates').upsert(
     {
       user_id: user.id,
       course_id: courseId,
@@ -567,10 +625,11 @@ async function issueCertificate(courseId: string) {
 }
 
 export async function generateCertificate(courseId: string): Promise<ActionResult<{ certId: string }>> {
-  const { supabase, user } = await getUser();
+  const { user } = await getUser();
   if (!user) return { success: false, error: 'Unauthorized' };
+  const admin = createSupabaseAdminClient();
 
-  const { data: enrollment } = await supabase
+  const { data: enrollment } = await admin
     .from('user_course_enrollments')
     .select('completed_at, progress_pct')
     .eq('user_id', user.id)
@@ -578,39 +637,106 @@ export async function generateCertificate(courseId: string): Promise<ActionResul
     .maybeSingle();
 
   if (!enrollment?.completed_at && (enrollment?.progress_pct ?? 0) < 100) {
-    return { success: false, error: 'Course not completed' };
+    return { success: false, error: 'Course not completed yet' };
   }
 
   await issueCertificate(courseId);
 
-  const { data: cert } = await supabase
+  const { data: cert } = await admin
     .from('training_certificates')
     .select('id')
     .eq('user_id', user.id)
     .eq('course_id', courseId)
     .single();
 
-  return { success: true, data: { certId: cert?.id ?? '' } };
+  if (!cert?.id) return { success: false, error: 'Certificate could not be generated' };
+
+  return { success: true, data: { certId: cert.id } };
 }
 
-export async function getCertificate(certId: string): Promise<ActionResult<LMSCertificate & { holderName: string }>> {
-  const { supabase } = await getUser();
+export async function getCertificate(certId: string): Promise<ActionResult<LMSCertificate & {
+  holderName: string;
+  holderJobTitle: string | null;
+  hospitalName: string | null;
+  orgName: string | null;
+}>> {
+  const admin = createSupabaseAdminClient();
 
-  const { data, error } = await supabase
+  const { data, error } = await admin
     .from('training_certificates')
-    .select('*, course:course_id(*), holder:user_id(first_name, last_name)')
+    .select('*, course:course_id(*), holder:user_id(first_name, last_name, job_title, org_id)')
     .eq('id', certId)
     .single();
 
   if (error) return { success: false, error: error.message };
 
-  const holder = Array.isArray(data.holder) ? data.holder[0] : data.holder;
+  const holder   = Array.isArray(data.holder) ? data.holder[0] : data.holder;
+  const holderName = [holder?.first_name, holder?.last_name].filter(Boolean).join(' ') || 'Unknown';
+
+  // fetch hospital name (first hospital assignment) and org name
+  let hospitalName: string | null = null;
+  let orgName: string | null = null;
+  if (holder?.org_id) {
+    const [hospRes, orgRes] = await Promise.all([
+      admin
+        .from('user_hospital_roles')
+        .select('hospital:hospital_id(name)')
+        .eq('user_id', data.user_id)
+        .limit(1)
+        .maybeSingle(),
+      admin.from('organizations').select('name').eq('id', holder.org_id).maybeSingle(),
+    ]);
+    const hosp = hospRes.data?.hospital as any;
+    hospitalName = Array.isArray(hosp) ? hosp[0]?.name : hosp?.name ?? null;
+    orgName = orgRes.data?.name ?? null;
+  }
+
   return {
     success: true,
     data: {
       ...data,
       course: Array.isArray(data.course) ? data.course[0] : data.course,
-      holderName: [holder?.first_name, holder?.last_name].filter(Boolean).join(' ') || 'Unknown',
+      holderName,
+      holderJobTitle: holder?.job_title ?? null,
+      hospitalName,
+      orgName,
+    },
+  };
+}
+
+export async function getCertPreviewData(courseId: string): Promise<ActionResult<{
+  displayName: string;
+  jobTitle: string;
+  hospitalName: string;
+  orgName: string;
+}>> {
+  const { user } = await getUser();
+  if (!user) return { success: false, error: 'Unauthorized' };
+  const admin = createSupabaseAdminClient();
+
+  const [profileRes, hospitalRes] = await Promise.all([
+    admin.from('profiles').select('first_name, last_name, job_title, org_id').eq('id', user.id).maybeSingle(),
+    admin.from('user_hospital_roles').select('hospital:hospital_id(name)').eq('user_id', user.id).limit(1).maybeSingle(),
+  ]);
+
+  const profile = profileRes.data;
+  const displayName = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ') || 'Your Name';
+  const hosp = hospitalRes.data?.hospital as any;
+  const hospitalName = (Array.isArray(hosp) ? hosp[0]?.name : hosp?.name) ?? '';
+
+  let orgName = '';
+  if (profile?.org_id) {
+    const { data: org } = await admin.from('organizations').select('name').eq('id', profile.org_id).maybeSingle();
+    orgName = org?.name ?? '';
+  }
+
+  return {
+    success: true,
+    data: {
+      displayName,
+      jobTitle: profile?.job_title ?? '',
+      hospitalName,
+      orgName,
     },
   };
 }
@@ -645,7 +771,7 @@ export async function getAdminCourses(filters?: {
 
   let query = admin
     .from('training_courses')
-    .select('*')
+    .select('*, module_count:training_modules(count)')
     .eq('org_id', orgId)
     .order('sort_order', { ascending: true })
     .order('created_at', { ascending: false });
@@ -657,7 +783,13 @@ export async function getAdminCourses(filters?: {
 
   const { data, error } = await query;
   if (error) return { success: false, error: error.message };
-  return { success: true, data: (data ?? []) as LMSCourse[] };
+  return {
+    success: true,
+    data: (data ?? []).map((c: any) => ({
+      ...c,
+      module_count: Array.isArray(c.module_count) ? (c.module_count[0]?.count ?? 0) : 0,
+    })) as LMSCourse[],
+  };
 }
 
 export async function createCourse(input: {
@@ -892,6 +1024,7 @@ export async function createQuizQuestion(quizId: string, input: {
   question_text: string;
   question_type: QuizQuestion['question_type'];
   options: QuizOption[];
+  correct_answer?: string | null;
   explanation?: string | null;
   points?: number;
   sort_order?: number;
@@ -950,6 +1083,42 @@ export async function deleteQuizQuestion(id: string): Promise<ActionResult> {
 // ADMIN: Assignments
 // ─────────────────────────────────────────────────────────────
 
+// shared helper: upsert course_assignments + user_course_enrollments for a list of user IDs
+async function _upsertAssignAndEnroll(
+  admin: ReturnType<typeof createSupabaseAdminClient>,
+  courseId: string,
+  orgId: string,
+  assignedBy: string,
+  userIds: string[],
+  dueDate: string | null,
+): Promise<{ assigned: number; error?: string }> {
+  if (!userIds.length) return { assigned: 0 };
+
+  const assignRows = userIds.map(uid => ({
+    course_id: courseId,
+    org_id: orgId,
+    assigned_to: uid,
+    assigned_by: assignedBy,
+    due_date: dueDate,
+  }));
+
+  const enrollRows = userIds.map(uid => ({
+    user_id: uid,
+    course_id: courseId,
+    due_date: dueDate,
+    progress_pct: 0,
+  }));
+
+  const [{ error: aErr }, { error: eErr }] = await Promise.all([
+    admin.from('course_assignments').upsert(assignRows, { onConflict: 'course_id,assigned_to' }),
+    admin.from('user_course_enrollments').upsert(enrollRows, { onConflict: 'user_id,course_id' }),
+  ]);
+
+  if (aErr) return { assigned: 0, error: aErr.message };
+  if (eErr) return { assigned: 0, error: eErr.message };
+  return { assigned: userIds.length };
+}
+
 export async function assignCourse(
   courseId: string,
   userIds: string[],
@@ -958,20 +1127,81 @@ export async function assignCourse(
   const { admin, user, orgId } = await getUserAndOrg();
   if (!user || !orgId) return { success: false, error: 'Unauthorized' };
 
-  const rows = userIds.map(uid => ({
-    course_id: courseId,
-    org_id: orgId,
-    assigned_to: uid,
-    assigned_by: user.id,
-    due_date: dueDate ?? null,
-  }));
+  const result = await _upsertAssignAndEnroll(admin, courseId, orgId, user.id, userIds, dueDate ?? null);
+  if (result.error) return { success: false, error: result.error };
+  return { success: true, data: { assigned: result.assigned } };
+}
 
-  const { error } = await admin
-    .from('course_assignments')
-    .upsert(rows, { onConflict: 'course_id,assigned_to' });
+export async function assignCourseToAll(
+  courseId: string,
+  dueDate?: string | null,
+): Promise<ActionResult<{ assigned: number }>> {
+  const { admin, user, orgId } = await getUserAndOrg();
+  if (!user || !orgId) return { success: false, error: 'Unauthorized' };
 
-  if (error) return { success: false, error: error.message };
-  return { success: true, data: { assigned: rows.length } };
+  const { data: staff, error: pErr } = await admin
+    .from('profiles')
+    .select('id')
+    .eq('org_id', orgId)
+    .eq('is_active', true);
+
+  if (pErr || !staff) return { success: false, error: pErr?.message ?? 'Could not fetch users' };
+
+  const result = await _upsertAssignAndEnroll(
+    admin, courseId, orgId, user.id,
+    staff.map(u => u.id),
+    dueDate ?? null,
+  );
+  if (result.error) return { success: false, error: result.error };
+  return { success: true, data: { assigned: result.assigned } };
+}
+
+export async function assignCourseByRoles(
+  courseId: string,
+  roles: string[],
+  dueDate?: string | null,
+): Promise<ActionResult<{ assigned: number }>> {
+  const { admin, user, orgId } = await getUserAndOrg();
+  if (!user || !orgId) return { success: false, error: 'Unauthorized' };
+  if (!roles.length) return { success: true, data: { assigned: 0 } };
+
+  const [hospRolesRes, orgRolesRes] = await Promise.all([
+    admin.from('user_hospital_roles').select('user_id').in('role', roles),
+    admin.from('org_user_roles').select('user_id').in('role', roles),
+  ]);
+
+  const allIds = Array.from(new Set([
+    ...(hospRolesRes.data ?? []).map(r => r.user_id),
+    ...(orgRolesRes.data ?? []).map(r => r.user_id),
+  ]));
+
+  if (!allIds.length) return { success: true, data: { assigned: 0 } };
+
+  const { data: orgUsers } = await admin
+    .from('profiles')
+    .select('id')
+    .eq('org_id', orgId)
+    .eq('is_active', true)
+    .in('id', allIds);
+
+  const userIds = (orgUsers ?? []).map(u => u.id);
+  if (!userIds.length) return { success: true, data: { assigned: 0 } };
+
+  const result = await _upsertAssignAndEnroll(admin, courseId, orgId, user.id, userIds, dueDate ?? null);
+  if (result.error) return { success: false, error: result.error };
+  return { success: true, data: { assigned: result.assigned } };
+}
+
+export async function getCourseAssignmentInfo(courseId: string): Promise<ActionResult<{ assignedCount: number; totalStaff: number }>> {
+  const { admin, user, orgId } = await getUserAndOrg();
+  if (!user || !orgId) return { success: false, error: 'Unauthorized' };
+
+  const [{ count: assignedCount }, { count: totalStaff }] = await Promise.all([
+    admin.from('course_assignments').select('*', { count: 'exact', head: true }).eq('course_id', courseId),
+    admin.from('profiles').select('*', { count: 'exact', head: true }).eq('org_id', orgId).eq('is_active', true),
+  ]);
+
+  return { success: true, data: { assignedCount: assignedCount ?? 0, totalStaff: totalStaff ?? 0 } };
 }
 
 export async function getOrgUsers(): Promise<ActionResult<Array<{ id: string; name: string; job_title: string | null; department: string | null }>>> {
@@ -1050,6 +1280,257 @@ export async function getAdminEnrollments(): Promise<ActionResult<Array<{
 }
 
 // ─────────────────────────────────────────────────────────────
+// ADMIN: Detailed Enrollments (time + module tracking)
+// ─────────────────────────────────────────────────────────────
+
+export interface DetailedEnrollment {
+  id: string;
+  user_id: string;
+  course_id: string;
+  user_name: string;
+  user_email: string | null;
+  job_title: string | null;
+  department: string | null;
+  avatar_url: string | null;
+  course_title: string;
+  course_color: string;
+  progress_pct: number;
+  completed_at: string | null;
+  enrolled_at: string;
+  due_date: string | null;
+  time_spent_secs: number;
+  modules_total: number;
+  modules_done: number;
+  last_activity: string | null;
+}
+
+export async function getDetailedEnrollments(): Promise<ActionResult<DetailedEnrollment[]>> {
+  const { admin, user, orgId } = await getUserAndOrg();
+  if (!user || !orgId) return { success: false, error: 'Unauthorized' };
+
+  // 1. fetch enrollments with user + course info
+  const { data, error } = await admin
+    .from('user_course_enrollments')
+    .select(`
+      *,
+      user:user_id(first_name, last_name, email, job_title, department, avatar_url),
+      course:course_id(id, title, cover_color, org_id)
+    `)
+    .order('enrolled_at', { ascending: false })
+    .limit(500);
+
+  if (error) return { success: false, error: error.message };
+
+  const orgRows = (data ?? []).filter((e: any) => {
+    const c = Array.isArray(e.course) ? e.course[0] : e.course;
+    return c?.org_id === orgId;
+  });
+
+  if (!orgRows.length) return { success: true, data: [] };
+
+  // 2. fetch module progress for time + completion counts
+  const enrollmentIds = orgRows.map((e: any) => e.id);
+  const courseIds = [...new Set(orgRows.map((e: any) => e.course_id))];
+
+  const [progressRes, modulesRes] = await Promise.all([
+    admin
+      .from('user_module_progress')
+      .select('user_id, module_id, completed_at, time_spent_secs, updated_at')
+      .in('user_id', orgRows.map((e: any) => e.user_id)),
+    admin
+      .from('training_modules')
+      .select('id, course_id')
+      .in('course_id', courseIds),
+  ]);
+
+  // build lookup: courseId → total module count
+  const modulesPerCourse: Record<string, string[]> = {};
+  for (const m of modulesRes.data ?? []) {
+    if (!modulesPerCourse[m.course_id]) modulesPerCourse[m.course_id] = [];
+    modulesPerCourse[m.course_id].push(m.id);
+  }
+
+  // build lookup: userId+moduleId → progress row
+  const progressMap: Record<string, any> = {};
+  for (const p of progressRes.data ?? []) {
+    progressMap[`${p.user_id}:${p.module_id}`] = p;
+  }
+
+  return {
+    success: true,
+    data: orgRows.map((e: any): DetailedEnrollment => {
+      const u = Array.isArray(e.user) ? e.user[0] : e.user;
+      const c = Array.isArray(e.course) ? e.course[0] : e.course;
+      const mods = modulesPerCourse[e.course_id] ?? [];
+      let timeSecs = 0;
+      let done = 0;
+      let lastActivity: string | null = null;
+      for (const modId of mods) {
+        const p = progressMap[`${e.user_id}:${modId}`];
+        if (p) {
+          timeSecs += p.time_spent_secs ?? 0;
+          if (p.completed_at) done++;
+          if (!lastActivity || (p.updated_at && p.updated_at > lastActivity)) lastActivity = p.updated_at;
+        }
+      }
+      return {
+        id: e.id,
+        user_id: e.user_id,
+        course_id: e.course_id,
+        user_name: [u?.first_name, u?.last_name].filter(Boolean).join(' ') || 'Unknown',
+        user_email: u?.email ?? null,
+        job_title: u?.job_title ?? null,
+        department: u?.department ?? null,
+        avatar_url: u?.avatar_url ?? null,
+        course_title: c?.title ?? 'Unknown',
+        course_color: c?.cover_color ?? '#f97316',
+        progress_pct: e.progress_pct ?? 0,
+        completed_at: e.completed_at,
+        enrolled_at: e.enrolled_at,
+        due_date: e.due_date,
+        time_spent_secs: timeSecs,
+        modules_total: mods.length,
+        modules_done: done,
+        last_activity: lastActivity,
+      };
+    }),
+  };
+}
+
+// ─────────────────────────────────────────────────────────────
+// Seed default YouTube courses
+// ─────────────────────────────────────────────────────────────
+
+const DEFAULT_COURSES: Array<{
+  title: string; description: string; category: string; level: string;
+  cover_color: string; estimated_hours: number; tags: string[];
+  is_required: boolean; compliance_type: string | null;
+  videos: Array<{ title: string; url: string; youtubeId: string }>;
+}> = [
+  {
+    title: 'CPR & First Aid Essentials',
+    description: 'Life-saving CPR and first aid techniques every staff member must know.',
+    category: 'cpr', level: 'beginner', cover_color: '#ef4444',
+    estimated_hours: 1.5, is_required: true, compliance_type: 'CPR',
+    tags: ['cpr', 'first-aid', 'required'],
+    videos: [
+      { title: 'CPR Step-by-Step Guide', url: 'https://www.youtube.com/watch?v=cosVBV96E2g', youtubeId: 'cosVBV96E2g' },
+      { title: 'How to Use an AED', url: 'https://www.youtube.com/watch?v=WH9Vt4apCgg', youtubeId: 'WH9Vt4apCgg' },
+    ],
+  },
+  {
+    title: 'OSHA Workplace Safety',
+    description: 'OSHA standards for veterinary clinics — hazard identification, PPE and incident reporting.',
+    category: 'osha', level: 'beginner', cover_color: '#f59e0b',
+    estimated_hours: 2, is_required: true, compliance_type: 'OSHA',
+    tags: ['osha', 'safety', 'compliance', 'required'],
+    videos: [
+      { title: 'OSHA Safety Orientation', url: 'https://www.youtube.com/watch?v=uCJ1p7VIGbA', youtubeId: 'uCJ1p7VIGbA' },
+      { title: 'PPE Usage & Selection', url: 'https://www.youtube.com/watch?v=qBj3PB_j3y0', youtubeId: 'qBj3PB_j3y0' },
+    ],
+  },
+  {
+    title: 'Animal Handling & Restraint',
+    description: 'Safe handling techniques for dogs, cats and exotic animals in a clinical setting.',
+    category: 'clinical', level: 'intermediate', cover_color: '#10b981',
+    estimated_hours: 2.5, is_required: true, compliance_type: null,
+    tags: ['animal-handling', 'clinical', 'safety'],
+    videos: [
+      { title: 'Dog Restraint Techniques', url: 'https://www.youtube.com/watch?v=K7IWgVL5GiM', youtubeId: 'K7IWgVL5GiM' },
+      { title: 'Cat Handling in the Clinic', url: 'https://www.youtube.com/watch?v=T-PNxS5N7zI', youtubeId: 'T-PNxS5N7zI' },
+    ],
+  },
+  {
+    title: 'Client Communication Skills',
+    description: 'Build trust with pet owners — empathy, active listening and delivering difficult news.',
+    category: 'hr', level: 'beginner', cover_color: '#3b82f6',
+    estimated_hours: 1, is_required: false, compliance_type: null,
+    tags: ['communication', 'client-service', 'soft-skills'],
+    videos: [
+      { title: 'Effective Communication in Healthcare', url: 'https://www.youtube.com/watch?v=Z8I1UQi2QBE', youtubeId: 'Z8I1UQi2QBE' },
+      { title: 'Delivering Difficult News to Pet Owners', url: 'https://www.youtube.com/watch?v=y8Ozg5UXHMo', youtubeId: 'y8Ozg5UXHMo' },
+    ],
+  },
+  {
+    title: 'Infection Control & Sterilisation',
+    description: 'Hospital hygiene protocols, sterilisation procedures and infection prevention.',
+    category: 'safety', level: 'intermediate', cover_color: '#6366f1',
+    estimated_hours: 2, is_required: true, compliance_type: 'Hospital Compliance',
+    tags: ['infection-control', 'hygiene', 'compliance'],
+    videos: [
+      { title: 'Surgical Instrument Sterilisation', url: 'https://www.youtube.com/watch?v=HlFLOq4Hmfw', youtubeId: 'HlFLOq4Hmfw' },
+      { title: 'Hand Hygiene Best Practices', url: 'https://www.youtube.com/watch?v=IisgnbMfKvI', youtubeId: 'IisgnbMfKvI' },
+    ],
+  },
+  {
+    title: 'Veterinary Pharmacology Basics',
+    description: 'Common medications, controlled substances, dosage calculation and safe administration.',
+    category: 'clinical', level: 'intermediate', cover_color: '#8b5cf6',
+    estimated_hours: 3, is_required: false, compliance_type: null,
+    tags: ['pharmacology', 'medications', 'clinical'],
+    videos: [
+      { title: 'Introduction to Veterinary Drugs', url: 'https://www.youtube.com/watch?v=9b4vRBpHGko', youtubeId: '9b4vRBpHGko' },
+      { title: 'Drug Dosage Calculations', url: 'https://www.youtube.com/watch?v=HGSjLkfC-bY', youtubeId: 'HGSjLkfC-bY' },
+    ],
+  },
+];
+
+export async function seedDefaultCourses(): Promise<ActionResult<{ seeded: number }>> {
+  const { admin, user, orgId } = await getUserAndOrg();
+  if (!user || !orgId) return { success: false, error: 'Unauthorized' };
+
+  let seeded = 0;
+  for (const c of DEFAULT_COURSES) {
+    // skip if a course with same title already exists for this org
+    const { data: existing } = await admin
+      .from('training_courses')
+      .select('id')
+      .eq('org_id', orgId)
+      .eq('title', c.title)
+      .maybeSingle();
+    if (existing) continue;
+
+    const { data: course, error: cErr } = await admin
+      .from('training_courses')
+      .insert({
+        org_id: orgId,
+        title: c.title,
+        description: c.description,
+        category: c.category,
+        level: c.level,
+        cover_color: c.cover_color,
+        estimated_hours: c.estimated_hours,
+        is_required: c.is_required,
+        compliance_type: c.compliance_type,
+        tags: c.tags,
+        is_published: true,
+        pass_score: 80,
+        created_by: user.id,
+      })
+      .select('id')
+      .single();
+
+    if (cErr || !course) continue;
+
+    for (let i = 0; i < c.videos.length; i++) {
+      const v = c.videos[i];
+      await admin.from('training_modules').insert({
+        course_id: course.id,
+        title: v.title,
+        content_type: 'video',
+        content_url: v.url,
+        sort_order: i + 1,
+        duration_mins: 10,
+        is_required: true,
+      });
+    }
+    seeded++;
+  }
+
+  return { success: true, data: { seeded } };
+}
+
+// ─────────────────────────────────────────────────────────────
 // ADMIN: Learning Paths
 // ─────────────────────────────────────────────────────────────
 
@@ -1057,13 +1538,17 @@ export async function getModuleViewCounts(courseId: string): Promise<Record<stri
   const { admin, user } = await getUserAndOrg();
   if (!user) return {};
 
+  const { data: mods } = await admin
+    .from('training_modules')
+    .select('id')
+    .eq('course_id', courseId);
+  const moduleIds = (mods ?? []).map(m => m.id);
+  if (!moduleIds.length) return {};
+
   const { data } = await admin
     .from('user_module_progress')
     .select('module_id')
-    .in(
-      'module_id',
-      admin.from('training_modules').select('id').eq('course_id', courseId) as any
-    );
+    .in('module_id', moduleIds);
 
   const counts: Record<string, number> = {};
   for (const row of data ?? []) {

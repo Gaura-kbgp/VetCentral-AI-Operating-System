@@ -2,9 +2,10 @@ import { createSupabaseAdminClient } from '@/lib/supabase/server';
 import Link from 'next/link';
 import {
   Calendar, GraduationCap, BookOpen, Building2, FolderOpen,
-  Users, Search, Sparkles, FileText, ChevronRight,
-  Clock, Mic, ArrowRight,
+  Users, Sparkles, FileText, ChevronRight,
+  Clock, ArrowRight,
 } from 'lucide-react';
+import { DashboardSearchBar } from './DashboardSearchBar';
 import type { AppRole } from '@/types/database';
 
 interface Props {
@@ -92,7 +93,7 @@ export default async function StaffDashboard({ userId, hospitalId }: Props) {
       .not('status', 'in', '("completed","cancelled")'),
 
     // My enrollments for training completion %
-    admin.from('course_enrollments')
+    admin.from('user_course_enrollments')
       .select('progress_pct, completed_at')
       .eq('user_id', userId)
       .limit(20),
@@ -124,8 +125,6 @@ export default async function StaffDashboard({ userId, hospitalId }: Props) {
     return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
   }
 
-  const SUGGESTIONS = ['CBC procedure', 'Employee handbook', 'OSHA requirements'];
-
   return (
     <div className="space-y-6 pb-8">
 
@@ -141,34 +140,7 @@ export default async function StaffDashboard({ userId, hospitalId }: Props) {
           Search across all hospital knowledge, SOPs, training materials, and more
         </p>
 
-        <div className="max-w-2xl mx-auto">
-          <Link href="/knowledge-base" className="flex items-center gap-3 bg-white rounded-xl px-5 py-4 shadow-lg hover:shadow-xl transition-shadow">
-            <Search className="h-5 w-5 text-gray-400 shrink-0" />
-            <span className="flex-1 text-left text-[15px] text-gray-400">
-              How do I run a CBC? Where is the employee handbook?…
-            </span>
-            <Mic className="h-5 w-5 text-gray-300 shrink-0" />
-            <span
-              className="shrink-0 px-5 py-2 rounded-lg text-[14px] font-semibold text-white"
-              style={{ backgroundColor: '#1e3a5f' }}
-            >
-              Search
-            </span>
-          </Link>
-
-          <div className="flex items-center justify-center gap-3 mt-4">
-            <span className="text-white/50 text-[13px]">Try:</span>
-            {SUGGESTIONS.map(s => (
-              <Link
-                key={s}
-                href={`/knowledge-base?q=${encodeURIComponent(s)}`}
-                className="px-3 py-1.5 bg-white/10 hover:bg-white/20 border border-white/20 rounded-full text-[12px] text-white/80 transition-colors"
-              >
-                {s}
-              </Link>
-            ))}
-          </div>
-        </div>
+        <DashboardSearchBar />
       </div>
 
       {/* ── Quick Actions ─────────────────────────────────────── */}

@@ -1,10 +1,12 @@
 import { createSupabaseAdminClient } from '@/lib/supabase/server';
-import Link from 'next/link';
 import {
-  Building2, Users, FolderOpen, AlertCircle, UserPlus,
+  Building2, Users, AlertCircle, UserPlus,
   Clock, CheckCircle2, ArrowRight, FileText, ChevronRight,
-  BookOpen, GraduationCap, Calendar, Search, Mic,
+  Calendar,
 } from 'lucide-react';
+import { DashboardSearchBar } from './DashboardSearchBar';
+import { QuickActions } from './QuickActions';
+import { SPALink } from '@/components/ui/spa-link';
 
 interface Props {
   userId: string;
@@ -14,14 +16,6 @@ interface Props {
   role: 'super_admin' | 'org_admin';
 }
 
-const QUICK_ACTIONS = [
-  { label: 'SOP Library',        href: '/knowledge-base', Icon: BookOpen,      color: '#1e3a5f', bg: '#eef2ff' },
-  { label: 'Training Center',    href: '/training',       Icon: GraduationCap, color: '#ea580c', bg: '#fff7ed' },
-  { label: 'Master Calendar',    href: '/calendar',       Icon: Calendar,      color: '#16a34a', bg: '#f0fdf4' },
-  { label: 'Employee Directory', href: '/hr',             Icon: Users,         color: '#7c3aed', bg: '#f5f3ff' },
-  { label: 'Hospital Resources', href: '/hospital-hub',   Icon: Building2,     color: '#1e3a5f', bg: '#eef2ff' },
-  { label: 'Projects',           href: '/projects',       Icon: FolderOpen,    color: '#db2777', bg: '#fdf2f8' },
-];
 
 const EVENT_TYPE_COLOR: Record<string, string> = {
   meeting:  '#3b82f6',
@@ -37,8 +31,6 @@ const PRIORITY_CHIP: Record<string, string> = {
   medium: 'bg-yellow-100 text-yellow-700',
   low:    'bg-gray-100 text-gray-500',
 };
-
-const SUGGESTIONS = ['CBC procedure', 'Employee handbook', 'OSHA requirements'];
 
 export default async function ExecutiveDashboard({ firstName }: Props) {
   const admin = createSupabaseAdminClient();
@@ -68,7 +60,7 @@ export default async function ExecutiveDashboard({ firstName }: Props) {
       .eq('status', 'pending')
       .order('created_at', { ascending: false })
       .limit(5),
-    admin.from('course_enrollments').select('user_id, completed_at'),
+    admin.from('user_course_enrollments').select('user_id, completed_at, progress_pct'),
     admin.from('calendar_events')
       .select('id, title, start_time, location, event_type, hospital_id')
       .gte('start_time', todayStart)
@@ -91,10 +83,13 @@ export default async function ExecutiveDashboard({ firstName }: Props) {
   const upcomingEvents = eventsRes.data ?? [];
   const auditLogs      = auditRes.data ?? [];
 
-  const enrollments = enrollmentsRes.data ?? [];
-  const enrolled    = new Set(enrollments.map(e => e.user_id)).size;
-  const trained     = new Set(enrollments.filter(e => e.completed_at).map(e => e.user_id)).size;
-  const trainingPct = enrolled > 0 ? Math.round((trained / enrolled) * 100) : 0;
+  const enrollments    = enrollmentsRes.data ?? [];
+  const totalEnrolled  = enrollments.length;
+  const completed      = enrollments.filter(e => e.completed_at).length;
+  const trainingPct    = totalEnrolled > 0 ? Math.round((completed / totalEnrolled) * 100) : 0;
+  const avgProgress    = totalEnrolled > 0
+    ? Math.round(enrollments.reduce((s, e) => s + (e.progress_pct ?? 0), 0) / totalEnrolled)
+    : 0;
 
   // ── Actor name map ───────────────────────────────────────────
   const actorIds = [...new Set(auditLogs.map(l => l.user_id).filter(Boolean))];
@@ -139,58 +134,13 @@ export default async function ExecutiveDashboard({ firstName }: Props) {
           Search across all hospital knowledge, SOPs, training materials, and more
         </p>
 
-        <div className="max-w-2xl mx-auto">
-          <Link
-            href="/knowledge-base"
-            className="flex items-center gap-3 bg-white rounded-xl px-5 py-4 shadow-lg hover:shadow-xl transition-shadow"
-          >
-            <Search className="h-5 w-5 text-gray-400 shrink-0" />
-            <span className="flex-1 text-left text-[15px] text-gray-400">
-              How do I run a CBC? Where is the employee handbook?…
-            </span>
-            <Mic className="h-5 w-5 text-gray-300 shrink-0" />
-            <span
-              className="shrink-0 px-5 py-2 rounded-lg text-[14px] font-semibold text-white"
-              style={{ backgroundColor: '#1e3a5f' }}
-            >
-              Search
-            </span>
-          </Link>
-
-          <div className="flex items-center justify-center gap-3 mt-4">
-            <span className="text-white/50 text-[13px]">Try:</span>
-            {SUGGESTIONS.map(s => (
-              <Link
-                key={s}
-                href={`/knowledge-base?q=${encodeURIComponent(s)}`}
-                className="px-3 py-1.5 bg-white/10 hover:bg-white/20 border border-white/20 rounded-full text-[12px] text-white/80 transition-colors"
-              >
-                {s}
-              </Link>
-            ))}
-          </div>
-        </div>
+        <DashboardSearchBar />
       </div>
 
       {/* ── Quick Actions ─────────────────────────────────────── */}
       <div>
         <h2 className="text-[18px] font-bold text-gray-900 mb-4">Quick Actions</h2>
-        <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
-          {QUICK_ACTIONS.map(({ label, href, Icon, color, bg }) => (
-            <Link
-              key={href + label}
-              href={href}
-              className="flex flex-col items-center gap-3 p-4 bg-white border border-slate-200/80 rounded-xl hover:shadow-md hover:border-blue-200 transition-all text-center group"
-            >
-              <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ backgroundColor: bg }}>
-                <Icon className="h-6 w-6" style={{ color }} />
-              </div>
-              <span className="text-[12px] font-medium text-gray-700 group-hover:text-gray-900 leading-tight">
-                {label}
-              </span>
-            </Link>
-          ))}
-        </div>
+        <QuickActions />
       </div>
 
       {/* ── Overview Stats ────────────────────────────────────── */}
@@ -219,9 +169,9 @@ export default async function ExecutiveDashboard({ firstName }: Props) {
         <div className="bg-white border border-slate-200/80 rounded-xl overflow-hidden">
           <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
             <h3 className="text-[16px] font-bold text-gray-900">Recent Activity</h3>
-            <Link href="/admin/audit-logs" className="text-[13px] font-medium text-[#1e3a5f] hover:underline">
+            <SPALink section="admin-audit-logs" className="text-[13px] font-medium text-[#1e3a5f] hover:underline">
               View All
-            </Link>
+            </SPALink>
           </div>
           {auditLogs.length === 0 ? (
             <div className="py-12 text-center">
@@ -262,9 +212,9 @@ export default async function ExecutiveDashboard({ firstName }: Props) {
         <div className="bg-white border border-slate-200/80 rounded-xl overflow-hidden">
           <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
             <h3 className="text-[16px] font-bold text-gray-900">Upcoming Events</h3>
-            <Link href="/calendar" className="text-[13px] font-medium text-[#1e3a5f] hover:underline">
+            <SPALink section="calendar" className="text-[13px] font-medium text-[#1e3a5f] hover:underline">
               View Calendar
-            </Link>
+            </SPALink>
           </div>
           {upcomingEvents.length === 0 ? (
             <div className="py-12 text-center">
@@ -307,9 +257,9 @@ export default async function ExecutiveDashboard({ firstName }: Props) {
         <div>
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-[18px] font-bold text-gray-900">Hospitals</h2>
-            <Link href="/hospital-hub" className="text-[13px] font-medium text-[#1e3a5f] flex items-center gap-1 hover:underline">
+            <SPALink section="hospital-hub" className="text-[13px] font-medium text-[#1e3a5f] flex items-center gap-1 hover:underline">
               Hospital Hub <ArrowRight className="h-3.5 w-3.5" />
-            </Link>
+            </SPALink>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {(hospitalsRes.data ?? []).map(h => {
@@ -318,10 +268,11 @@ export default async function ExecutiveDashboard({ firstName }: Props) {
               ).size;
               const hospProjects = (projectsRes.data ?? []).filter(p => p.hospital_id === h.id).length;
               return (
-                <Link
+                <SPALink
                   key={h.id}
-                  href={`/hospital-hub/${h.slug ?? h.id}`}
-                  className="bg-white border border-slate-200/80 rounded-xl p-5 hover:shadow-md hover:border-blue-200 transition-all group"
+                  section="hospital-hub"
+                  subId={h.id}
+                  className="bg-white border border-slate-200/80 rounded-xl p-5 hover:shadow-md hover:border-blue-200 transition-all group text-left w-full block"
                 >
                   <div className="flex items-center gap-3 mb-4">
                     <div
@@ -346,7 +297,7 @@ export default async function ExecutiveDashboard({ firstName }: Props) {
                       <p className="text-[10px] text-gray-500 uppercase tracking-wide">Projects</p>
                     </div>
                   </div>
-                </Link>
+                </SPALink>
               );
             })}
           </div>
@@ -379,9 +330,9 @@ export default async function ExecutiveDashboard({ firstName }: Props) {
             ))}
           </div>
           <div className="px-5 py-3 border-t border-gray-100 bg-gray-50/50">
-            <Link href="/approvals" className="text-[13px] text-[#1e3a5f] font-medium flex items-center gap-1 hover:underline">
+            <SPALink section="approvals" className="text-[13px] text-[#1e3a5f] font-medium flex items-center gap-1 hover:underline">
               Manage all requests <ArrowRight className="h-3.5 w-3.5" />
-            </Link>
+            </SPALink>
           </div>
         </div>
       )}
@@ -394,15 +345,15 @@ export default async function ExecutiveDashboard({ firstName }: Props) {
             <p className="text-[28px] font-bold text-gray-900 mt-1">{trainingPct}%</p>
             <p className="text-[12px] text-gray-500">Overall Completion</p>
           </div>
-          <Link
-            href="/training"
+          <SPALink
+            section="training"
             className="px-5 py-2.5 rounded-lg text-[14px] font-semibold text-white transition-colors hover:opacity-90"
             style={{ backgroundColor: '#f97316' }}
           >
             View Training
-          </Link>
+          </SPALink>
         </div>
-        <div className="w-full h-3 bg-gray-100 rounded-full overflow-hidden">
+        <div className="w-full h-3 bg-gray-100 rounded-full overflow-hidden mb-4">
           <div
             className="h-full rounded-full transition-all duration-700"
             style={{
@@ -411,6 +362,20 @@ export default async function ExecutiveDashboard({ firstName }: Props) {
             }}
           />
         </div>
+        {totalEnrolled > 0 && (
+          <div className="grid grid-cols-3 gap-3 pt-1">
+            {[
+              { label: 'Enrolled',   value: totalEnrolled, cls: 'text-blue-600' },
+              { label: 'Completed',  value: completed,     cls: 'text-green-600' },
+              { label: 'Avg Progress', value: `${avgProgress}%`, cls: avgProgress >= 70 ? 'text-green-600' : 'text-orange-500' },
+            ].map(s => (
+              <div key={s.label} className="text-center p-3 rounded-lg bg-slate-50">
+                <p className={`text-[18px] font-bold ${s.cls}`}>{s.value}</p>
+                <p className="text-[11px] text-gray-500 mt-0.5">{s.label}</p>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
     </div>

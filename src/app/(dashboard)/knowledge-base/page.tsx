@@ -31,6 +31,7 @@ export default async function KnowledgeBasePage() {
       <KBShell
         initialCategories={categories}
         initialTags={tags}
+        role={null}
       />
     </div>
   );

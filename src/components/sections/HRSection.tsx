@@ -5,7 +5,8 @@ import { useQuery } from '@tanstack/react-query';
 import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 import { PageHeader } from '@/components/ui/page-header';
 import HRClient from '@/app/(dashboard)/hr/client';
-import type { EmployeeRow } from '@/lib/actions/hr';
+import type { EmployeeRow, OnboardingEmployeeRow } from '@/lib/actions/hr';
+import { getEmployeesInOnboarding } from '@/lib/actions/hr';
 import { TableSkeleton } from './skeletons';
 import type { SectionProps } from './types';
 
@@ -56,7 +57,12 @@ export function HRSection({ userId, orgId }: SectionProps) {
         roles: rolesByUser.get(p.id) ?? [],
       }));
 
-      return { employees, hospitals: hospitalList };
+      const onboardingRes = await getEmployeesInOnboarding();
+      return {
+        employees,
+        hospitals: hospitalList,
+        newEmployees: onboardingRes.employees,
+      };
     },
   });
 
@@ -69,7 +75,13 @@ export function HRSection({ userId, orgId }: SectionProps) {
         variant="banner"
         icon={<Users className="h-7 w-7" />}
       />
-      {data ? <HRClient employees={data.employees} hospitals={data.hospitals} /> : <TableSkeleton />}
+      {data ? (
+        <HRClient
+          employees={data.employees}
+          newEmployees={data.newEmployees ?? []}
+          hospitals={data.hospitals}
+        />
+      ) : <TableSkeleton />}
     </div>
   );
 }

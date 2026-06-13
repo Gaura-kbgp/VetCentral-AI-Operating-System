@@ -334,6 +334,7 @@ export const ALL_NAV_ITEMS: NavItem[] = [
   { label: 'My Tasks',            href: '/tasks',           iconKey: 'CheckSquare2',    section: 'core', permission: 'tasks:view' },
   { label: 'Announcements',       href: '/announcements',   iconKey: 'Megaphone',       section: 'core' },
   { label: 'Messages',            href: '/messages',        iconKey: 'MessageSquare',   section: 'core' },
+  { label: 'Communication',       href: '/communication',   iconKey: 'Hash',            section: 'core', permission: 'communication:view' },
   { label: 'My Requests',         href: '/requests-portal', iconKey: 'Inbox',           section: 'core' },
 
   // Role-gated core
@@ -348,7 +349,6 @@ export const ALL_NAV_ITEMS: NavItem[] = [
 
   // Admin section
   { label: 'Approval Center',     href: '/approvals',       iconKey: 'CheckSquare',     section: 'admin', permission: 'requests:approve', badge: 'pendingRequests' },
-  { label: 'Schedule Requests',   href: '/schedule-requests', iconKey: 'ClipboardList', section: 'admin', permission: 'requests:approve' },
   { label: 'User Management',     href: '/admin/users',     iconKey: 'UserCog',         section: 'admin', permission: 'users:create' },
   { label: 'Roles & Permissions', href: '/admin/roles',     iconKey: 'Shield',          section: 'admin', permission: 'roles:view' },
   { label: 'Audit Logs',          href: '/admin/audit-logs', iconKey: 'Activity',       section: 'admin', permission: 'audit_logs:view' },

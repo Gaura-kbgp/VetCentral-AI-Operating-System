@@ -32,6 +32,9 @@ export interface CreateEmployeeInput {
   hospital_id: string;
   role:        AppRole;
   password?:   string; // if omitted, auto-generated
+  // 'new_onboard' → onboarding record created, user gated to onboarding on first login
+  // 'existing'    → skips onboarding entirely
+  employee_type?: 'new_onboard' | 'existing';
 }
 
 export interface CreateEmployeeResult {
@@ -124,17 +127,19 @@ export async function createEmployee(
       return { success: false, error: roleError.message };
     }
 
-    // Auto-create onboarding record so employee is gated to onboarding on first login
-    try {
-      await adminClient.from('onboarding_records').insert({
-        org_id:       callerProfile.org_id,
-        employee_id:  newUserId,
-        hospital_id:  input.hospital_id,
-        hr_manager_id: user.id,
-        created_by:   user.id,
-        start_date:   new Date().toISOString(),
-      });
-    } catch { /* non-blocking — onboarding can be started manually if insert fails */ }
+    // Onboarding record only for new hires — existing employees skip onboarding
+    if (input.employee_type !== 'existing') {
+      try {
+        await adminClient.from('onboarding_records').insert({
+          org_id:       callerProfile.org_id,
+          employee_id:  newUserId,
+          hospital_id:  input.hospital_id,
+          hr_manager_id: user.id,
+          created_by:   user.id,
+          start_date:   new Date().toISOString(),
+        });
+      } catch { /* non-blocking — onboarding can be started manually if insert fails */ }
+    }
 
     revalidatePath('/hr');
     revalidatePath('/admin/users');
@@ -445,6 +450,140 @@ export async function assignRoleToEmployee(
   }
 }
 
+// ── New Users (no onboarding record) ────────────────────────────────────────
+
+export interface NewUserRow {
+  id: string;
+  first_name: string | null;
+  last_name: string | null;
+  email: string | null;
+  job_title: string | null;
+  department: string | null;
+  avatar_url: string | null;
+  created_at: string;
+  primary_hospital_id: string | null;
+  primary_hospital_name: string | null;
+  primary_hospital_color: string | null;
+}
+
+export async function getUsersWithoutOnboarding(): Promise<{ users: NewUserRow[]; error?: string }> {
+  try {
+    const supabase = await createSupabaseServerClient();
+    const admin    = createSupabaseAdminClient();
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { users: [], error: 'Unauthorized' };
+
+    const { data: callerProfile } = await admin
+      .from('profiles').select('org_id').eq('id', user.id).single();
+    if (!callerProfile?.org_id) return { users: [], error: 'Organization not found' };
+
+    const { data: callerRoles } = await admin
+      .from('user_hospital_roles').select('role').eq('user_id', user.id);
+    if (!callerRoles?.some(r => HR_ACCESS_ROLES.includes(r.role as AppRole)))
+      return { users: [], error: 'Access denied' };
+
+    // Employee IDs that already have an onboarding record
+    const { data: existing } = await admin
+      .from('onboarding_records')
+      .select('employee_id')
+      .eq('org_id', callerProfile.org_id);
+    const onboardedSet = new Set((existing ?? []).map(r => r.employee_id));
+
+    // Only consider users created within the last 30 days — established employees are not "new users"
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - 30);
+
+    const { data: profiles, error } = await admin
+      .from('profiles')
+      .select('id, first_name, last_name, email, job_title, department, avatar_url, created_at')
+      .eq('org_id', callerProfile.org_id)
+      .gte('created_at', cutoff.toISOString())
+      .order('created_at', { ascending: false });
+    if (error) return { users: [], error: error.message };
+
+    const pending = (profiles ?? []).filter(p => !onboardedSet.has(p.id));
+    if (pending.length === 0) return { users: [] };
+
+    const pendingIds = pending.map(p => p.id);
+    const { data: roles } = await admin
+      .from('user_hospital_roles').select('user_id, hospital_id').in('user_id', pendingIds);
+
+    const hospIds = [...new Set((roles ?? []).map(r => r.hospital_id))];
+    const { data: hospList } = hospIds.length > 0
+      ? await admin.from('hospitals').select('id, name, color').in('id', hospIds)
+      : { data: [] };
+    const hospMap = new Map((hospList ?? []).map(h => [h.id, h]));
+
+    const primaryHospByUser = new Map<string, string>();
+    for (const r of (roles ?? [])) {
+      if (!primaryHospByUser.has(r.user_id)) primaryHospByUser.set(r.user_id, r.hospital_id);
+    }
+
+    const users: NewUserRow[] = pending.map(p => {
+      const hid  = primaryHospByUser.get(p.id) ?? null;
+      const hosp = hid ? hospMap.get(hid) : null;
+      return {
+        ...p,
+        primary_hospital_id:    hid,
+        primary_hospital_name:  hosp?.name  ?? null,
+        primary_hospital_color: hosp?.color ?? null,
+      };
+    });
+
+    return { users };
+  } catch (err) {
+    return { users: [], error: err instanceof Error ? err.message : 'Error' };
+  }
+}
+
+export async function sendUsersToOnboarding(
+  userIds: string[],
+): Promise<{ success: boolean; created: number; error?: string }> {
+  try {
+    const supabase = await createSupabaseServerClient();
+    const admin    = createSupabaseAdminClient();
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, created: 0, error: 'Unauthorized' };
+
+    const { data: callerRoles } = await admin
+      .from('user_hospital_roles').select('role').eq('user_id', user.id);
+    if (!callerRoles?.some(r => HR_ACCESS_ROLES.includes(r.role as AppRole)))
+      return { success: false, created: 0, error: 'Access denied' };
+
+    const { data: callerProfile } = await admin
+      .from('profiles').select('org_id').eq('id', user.id).single();
+    if (!callerProfile?.org_id) return { success: false, created: 0, error: 'Organization not found' };
+
+    const { data: roles } = await admin
+      .from('user_hospital_roles').select('user_id, hospital_id').in('user_id', userIds);
+    const hospByUser = new Map<string, string>();
+    for (const r of (roles ?? [])) {
+      if (!hospByUser.has(r.user_id)) hospByUser.set(r.user_id, r.hospital_id);
+    }
+
+    const records = userIds.map(uid => ({
+      org_id:        callerProfile.org_id,
+      employee_id:   uid,
+      hospital_id:   hospByUser.get(uid) ?? null,
+      hr_manager_id: user.id,
+      created_by:    user.id,
+      start_date:    new Date().toISOString(),
+    }));
+
+    const { error } = await admin.from('onboarding_records').insert(records);
+    if (error) return { success: false, created: 0, error: error.message };
+
+    revalidatePath('/hr');
+    revalidatePath('/admin/users');
+    revalidatePath('/onboarding');
+    return { success: true, created: records.length };
+  } catch (err) {
+    return { success: false, created: 0, error: err instanceof Error ? err.message : 'Error' };
+  }
+}
+
 export async function toggleEmployeeStatus(
   targetUserId: string,
   isActive:     boolean,
@@ -475,5 +614,89 @@ export async function toggleEmployeeStatus(
     return { success: true };
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : 'Error' };
+  }
+}
+
+// ── Employees currently in onboarding process ─────────────────────────────────
+
+export type OnboardingStatus = 'active' | 'on_hold' | 'completed' | 'cancelled';
+
+export interface OnboardingEmployeeRow extends EmployeeRow {
+  onboarding_id:         string;
+  onboarding_status:     OnboardingStatus;
+  onboarding_started_at: string;
+}
+
+export async function getEmployeesInOnboarding(): Promise<{
+  employees: OnboardingEmployeeRow[];
+  error?: string;
+}> {
+  try {
+    const supabase = await createSupabaseServerClient();
+    const admin    = createSupabaseAdminClient();
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { employees: [], error: 'Unauthorized' };
+
+    const { data: callerProfile } = await admin
+      .from('profiles').select('org_id').eq('id', user.id).single();
+    if (!callerProfile?.org_id) return { employees: [], error: 'Organization not found' };
+
+    const orgId = callerProfile.org_id;
+
+    const { data: callerRoles } = await admin
+      .from('user_hospital_roles').select('role').eq('user_id', user.id);
+    if (!callerRoles?.some(r => HR_ACCESS_ROLES.includes(r.role as AppRole)))
+      return { employees: [], error: 'Access denied' };
+
+    // Fetch onboarding records with active status (not completed/cancelled)
+    const { data: records, error: recErr } = await admin
+      .from('onboarding_records')
+      .select('id, employee_id, status, created_at')
+      .eq('org_id', orgId)
+      .in('status', ['active', 'on_hold'])
+      .order('created_at', { ascending: false });
+
+    if (recErr) return { employees: [], error: recErr.message };
+    if (!records || records.length === 0) return { employees: [] };
+
+    const employeeIds = records.map(r => r.employee_id as string);
+
+    const [profilesRes, rolesRes, hospitalsRes] = await Promise.all([
+      admin
+        .from('profiles')
+        .select('id, first_name, last_name, email, job_title, department, avatar_url, is_active, created_at, last_seen_at')
+        .in('id', employeeIds),
+      admin
+        .from('user_hospital_roles').select('user_id, role, hospital_id').in('user_id', employeeIds),
+      admin
+        .from('hospitals').select('id, name, color').eq('org_id', orgId),
+    ]);
+
+    const profileMap  = new Map((profilesRes.data ?? []).map(p => [p.id, p]));
+    const hospitalMap = new Map((hospitalsRes.data ?? []).map(h => [h.id, h]));
+    const rolesByUser = new Map<string, EmployeeRow['roles']>();
+    for (const r of (rolesRes.data ?? [])) {
+      if (!rolesByUser.has(r.user_id)) rolesByUser.set(r.user_id, []);
+      rolesByUser.get(r.user_id)!.push({ role: r.role as AppRole, hospital: hospitalMap.get(r.hospital_id) ?? null });
+    }
+
+    const employees: OnboardingEmployeeRow[] = records
+      .map(rec => {
+        const profile = profileMap.get(rec.employee_id as string);
+        if (!profile) return null;
+        return {
+          ...profile,
+          roles:                 rolesByUser.get(profile.id) ?? [],
+          onboarding_id:         rec.id as string,
+          onboarding_status:     rec.status as OnboardingStatus,
+          onboarding_started_at: rec.created_at as string,
+        };
+      })
+      .filter((e): e is OnboardingEmployeeRow => e !== null);
+
+    return { employees };
+  } catch (err) {
+    return { employees: [], error: err instanceof Error ? err.message : 'Error' };
   }
 }

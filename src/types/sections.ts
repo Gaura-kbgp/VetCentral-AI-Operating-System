@@ -6,7 +6,8 @@ export type SectionKey =
   | 'schedule-requests' | 'admin-users' | 'admin-roles' | 'admin-departments'
   | 'admin-hospitals' | 'admin-integrations' | 'admin-audit-logs' | 'admin-settings'
   | 'notifications' | 'profile' | 'help' | 'settings-preferences'
-  | 'settings-security' | 'settings-ai';
+  | 'settings-security' | 'settings-ai'
+  | 'communication';
 
 export const HREF_TO_SECTION: Record<string, SectionKey> = {
   '/dashboard':            'dashboard',
@@ -41,4 +42,5 @@ export const HREF_TO_SECTION: Record<string, SectionKey> = {
   '/settings/preferences': 'settings-preferences',
   '/settings/security':    'settings-security',
   '/settings/ai':          'settings-ai',
+  '/communication':        'communication',
 };

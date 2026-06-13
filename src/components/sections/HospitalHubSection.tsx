@@ -11,7 +11,7 @@ import type { ViewRole } from '@/lib/actions/hospital-hub';
 const EXECUTIVE_ROLES = ['super_admin', 'org_admin'];
 const MANAGER_ROLES   = ['hospital_admin', 'practice_manager'];
 
-export function HospitalHubSection({ userId }: SectionProps) {
+export function HospitalHubSection({ userId, subId }: SectionProps) {
   const { data } = useQuery({
     queryKey: ['hospital-hub-init', userId],
     queryFn: async () => {
@@ -55,6 +55,7 @@ export function HospitalHubSection({ userId }: SectionProps) {
           userId={userId}
           viewRole={data.viewRole}
           userRoles={data.userRoles}
+          initialSelectedId={subId}
         />
       ) : <BannerCardGridSkeleton />}
     </div>

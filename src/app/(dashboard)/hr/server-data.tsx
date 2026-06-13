@@ -3,7 +3,8 @@ import { redirect } from 'next/navigation';
 import { PageHeader } from '@/components/ui/page-header';
 import { Users } from 'lucide-react';
 import HRClient from './client';
-import type { EmployeeRow } from '@/lib/actions/hr';
+import type { EmployeeRow, OnboardingEmployeeRow } from '@/lib/actions/hr';
+import { getEmployeesInOnboarding } from '@/lib/actions/hr';
 
 const HR_ACCESS_ROLES = ['super_admin', 'org_admin', 'hospital_admin', 'practice_manager', 'hr'];
 
@@ -14,7 +15,6 @@ export default async function HRPageServer() {
 
   const admin = createSupabaseAdminClient();
 
-  // Get caller's org_id and check access — two separate queries, no FK join
   const { data: callerProfile } = await admin
     .from('profiles')
     .select('org_id')
@@ -33,16 +33,25 @@ export default async function HRPageServer() {
   const hasAccess = callerRoles?.some(r => HR_ACCESS_ROLES.includes(r.role));
   if (!hasAccess) redirect('/dashboard');
 
-  // Fetch all profiles in this org
-  const { data: profiles } = await admin
-    .from('profiles')
-    .select('id, first_name, last_name, email, job_title, department, avatar_url, is_active, created_at, last_seen_at')
-    .eq('org_id', orgId)
-    .order('first_name');
+  // Fetch all profiles + onboarding employees in parallel
+  const [profilesRes, onboardingRes, hospitalsRes] = await Promise.all([
+    admin
+      .from('profiles')
+      .select('id, first_name, last_name, email, job_title, department, avatar_url, is_active, created_at, last_seen_at')
+      .eq('org_id', orgId)
+      .order('first_name'),
+    getEmployeesInOnboarding(),
+    admin
+      .from('hospitals')
+      .select('id, name, color')
+      .eq('org_id', orgId)
+      .order('name'),
+  ]);
 
-  const profileList = profiles ?? [];
+  const profileList  = profilesRes.data ?? [];
+  const hospitalList = hospitalsRes.data ?? [];
 
-  // Fetch all role assignments for these users
+  // Fetch all role assignments for all users
   const userIds = profileList.map(p => p.id);
   const { data: allRoles } = userIds.length > 0
     ? await admin
@@ -51,17 +60,8 @@ export default async function HRPageServer() {
         .in('user_id', userIds)
     : { data: [] };
 
-  // Fetch all hospitals in this org
-  const { data: hospitals } = await admin
-    .from('hospitals')
-    .select('id, name, color')
-    .eq('org_id', orgId)
-    .order('name');
-
-  const hospitalList = hospitals ?? [];
   const hospitalMap = new Map(hospitalList.map(h => [h.id, h]));
 
-  // Group roles by user_id
   const rolesByUser = new Map<string, EmployeeRow['roles']>();
   for (const r of (allRoles ?? [])) {
     if (!rolesByUser.has(r.user_id)) rolesByUser.set(r.user_id, []);
@@ -71,11 +71,12 @@ export default async function HRPageServer() {
     });
   }
 
-  // Assemble final employee rows
   const employees: EmployeeRow[] = profileList.map(p => ({
     ...p,
     roles: rolesByUser.get(p.id) ?? [],
   }));
+
+  const newEmployees: OnboardingEmployeeRow[] = onboardingRes.employees;
 
   return (
     <div className="flex flex-col h-full">
@@ -87,6 +88,7 @@ export default async function HRPageServer() {
       />
       <HRClient
         employees={employees}
+        newEmployees={newEmployees}
         hospitals={hospitalList}
       />
     </div>

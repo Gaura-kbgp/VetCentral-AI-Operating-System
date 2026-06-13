@@ -2,11 +2,11 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { KBShell } from '@/components/knowledge-base/kb-shell';
-import { getKBCategories, getKBTags, seedKBCategories } from '@/lib/actions/knowledge';
+import { getKBCategories, getKBTags, seedKBCategories, seedDefaultDocuments } from '@/lib/actions/knowledge';
 import type { KBCategory, KBTag } from '@/types/app';
 import type { SectionProps } from './types';
 
-export function KnowledgeBaseSection(_: SectionProps) {
+export function KnowledgeBaseSection({ role }: SectionProps) {
   const { data } = useQuery({
     queryKey: ['kb-meta'],
     queryFn: async () => {
@@ -14,6 +14,8 @@ export function KnowledgeBaseSection(_: SectionProps) {
       if (catsResult.success && catsResult.data.length === 0) {
         catsResult = await seedKBCategories();
       }
+      // Seed default documents (CBC, Employee Handbook, OSHA) — skips if already exist
+      await seedDefaultDocuments();
       return {
         categories: (catsResult.success ? catsResult.data : []) as KBCategory[],
         tags: (tagsResult.success ? tagsResult.data : []) as KBTag[],
@@ -27,6 +29,7 @@ export function KnowledgeBaseSection(_: SectionProps) {
       <KBShell
         initialCategories={data?.categories ?? []}
         initialTags={data?.tags ?? []}
+        role={role}
       />
     </div>
   );

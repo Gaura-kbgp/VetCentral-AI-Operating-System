@@ -6,11 +6,14 @@ import {
   GraduationCap, FolderOpen, Building2, Sparkles,
   UserPlus, Inbox, Settings, ClipboardList, Users, UserCog,
   CheckSquare, Shield, FileText, AlertCircle, BarChart3, Activity,
-  Megaphone,
+  Megaphone, Hash,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getVisibleNavItems, ROLE_META, type NavItem } from '@/lib/permissions';
 import { useSPANavigation, HREF_TO_SECTION } from '@/contexts/spa-navigation';
+import { getUnreadMessageCount } from '@/lib/actions/communication';
+import { getMyReceivedTaskCount } from '@/lib/actions/tasks';
+import { getDirectInboxUnreadCount } from '@/lib/actions/direct-requests';
 import type { AppRole } from '@/types/database';
 
 const ICON_MAP: Record<string, React.ElementType> = {
@@ -18,7 +21,7 @@ const ICON_MAP: Record<string, React.ElementType> = {
   GraduationCap, FolderOpen, Building2, Sparkles,
   UserPlus, Inbox, Settings, ClipboardList, Users, UserCog,
   CheckSquare, CheckSquare2: CheckSquare, Shield, FileText, AlertCircle,
-  BarChart3, Activity, Megaphone,
+  BarChart3, Activity, Megaphone, Hash,
 };
 
 interface NavLinkProps {
@@ -78,6 +81,39 @@ function AppSidebarInner({ role, pendingRequestCount = 0 }: Props) {
   useEffect(() => { setMounted(true); }, []);
 
   const { activeSection, navigate } = useSPANavigation();
+  const [unreadMessages, setUnreadMessages] = useState(0);
+  const [pendingTaskCount, setPendingTaskCount] = useState(0);
+  const [directInboxCount, setDirectInboxCount] = useState(0);
+
+  // poll unread message count; re-check on section change (reading clears it)
+  useEffect(() => {
+    let alive = true;
+    const load = () =>
+      getUnreadMessageCount().then(r => { if (alive && r.success) setUnreadMessages(r.data.count); });
+    load();
+    const t = setInterval(load, 30000);
+    return () => { alive = false; clearInterval(t); };
+  }, [activeSection]);
+
+  // poll pending received task count
+  useEffect(() => {
+    let alive = true;
+    const load = () =>
+      getMyReceivedTaskCount().then(r => { if (alive && r.success) setPendingTaskCount(r.data); });
+    load();
+    const t = setInterval(load, 60000);
+    return () => { alive = false; clearInterval(t); };
+  }, [activeSection]);
+
+  // poll direct request inbox unread count
+  useEffect(() => {
+    let alive = true;
+    const load = () =>
+      getDirectInboxUnreadCount().then(r => { if (alive && r.success) setDirectInboxCount(r.data); });
+    load();
+    const t = setInterval(load, 60000);
+    return () => { alive = false; clearInterval(t); };
+  }, [activeSection]);
 
   const visibleItems = getVisibleNavItems(role);
   const coreItems  = visibleItems.filter(i => i.section === 'core');
@@ -87,6 +123,9 @@ function AppSidebarInner({ role, pendingRequestCount = 0 }: Props) {
 
   function getBadge(item: NavItem): number | undefined {
     if (item.badge === 'pendingRequests') return pendingRequestCount;
+    if (HREF_TO_SECTION[item.href] === 'messages') return unreadMessages;
+    if (HREF_TO_SECTION[item.href] === 'tasks') return pendingTaskCount || undefined;
+    if (HREF_TO_SECTION[item.href] === 'requests-portal') return directInboxCount || undefined;
     return undefined;
   }
 

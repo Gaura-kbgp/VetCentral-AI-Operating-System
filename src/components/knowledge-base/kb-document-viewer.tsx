@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import {
   ArrowLeft, Edit2, Clock, Eye, Tag, Globe, Building2, Lock,
   BookOpen, History, Share2, Printer, FileText, Archive,
-  RotateCcw, ChevronRight,
+  RotateCcw, ChevronRight, Download,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -142,6 +142,17 @@ export function KBDocumentViewer({ document: doc, versions, categories, tags }: 
         </div>
 
         <div className="ml-auto flex items-center gap-2">
+          {/* Download PDF — always visible, opens print-ready page */}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => window.open(`/api/v1/documents/pdf?id=${currentDoc.id}&print=1`, '_blank')}
+            className="gap-1.5 text-xs text-blue-600 border-blue-200 hover:bg-blue-50"
+          >
+            <Download className="h-3.5 w-3.5" />
+            Download PDF
+          </Button>
+
           {currentDoc.status === 'archived' ? (
             <Button
               size="sm"

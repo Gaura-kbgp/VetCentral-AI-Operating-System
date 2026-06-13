@@ -24,8 +24,9 @@ const TYPE_LABELS: Record<string, string> = {
 };
 
 export default function ApprovalDashboard({ metrics, pending, overdue, escalated, completed }: Props) {
-  const [activeTab, setActiveTab] = useState<TabType>('pending');
+  const [activeTab, setActiveTab]       = useState<TabType>('pending');
   const [selectedType, setSelectedType] = useState<RequestType | 'all'>('all');
+  const [search, setSearch]             = useState('');
 
   const tabs = [
     { id: 'pending',   label: 'Pending Approvals', count: metrics.pending_count,   icon: Clock },
@@ -34,15 +35,24 @@ export default function ApprovalDashboard({ metrics, pending, overdue, escalated
     { id: 'completed', label: 'Completed Today',   count: metrics.completed_today, icon: CheckCircle },
   ];
 
-  function filterByType(list: RequestSummary[]) {
-    return selectedType === 'all' ? list : list.filter(r => r.request_type === selectedType);
+  function applyFilters(list: RequestSummary[]) {
+    let out = selectedType === 'all' ? list : list.filter(r => r.request_type === selectedType);
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      out = out.filter(r =>
+        r.title?.toLowerCase().includes(q) ||
+        r.request_type?.toLowerCase().includes(q) ||
+        (r.requester && `${r.requester.first_name ?? ''} ${r.requester.last_name ?? ''}`.toLowerCase().includes(q))
+      );
+    }
+    return out;
   }
 
   const listMap: Record<TabType, RequestSummary[]> = {
-    pending:   filterByType(pending),
-    overdue:   filterByType(overdue),
-    escalated: filterByType(escalated),
-    completed: filterByType(completed),
+    pending:   applyFilters(pending),
+    overdue:   applyFilters(overdue),
+    escalated: applyFilters(escalated),
+    completed: applyFilters(completed),
   };
 
   const currentList = listMap[activeTab];
@@ -89,7 +99,12 @@ export default function ApprovalDashboard({ metrics, pending, overdue, escalated
         </div>
       </div>
 
-      <FilterBar selectedType={selectedType} onTypeChange={setSelectedType} />
+      <FilterBar
+        selectedType={selectedType}
+        onTypeChange={setSelectedType}
+        search={search}
+        onSearchChange={setSearch}
+      />
 
       {/* List */}
       <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
@@ -99,7 +114,10 @@ export default function ApprovalDashboard({ metrics, pending, overdue, escalated
           </h2>
           <div className="flex items-center gap-2">
             <Filter className="h-4 w-4 text-gray-500" />
-            <span className="text-sm text-gray-600 dark:text-gray-400">{currentList.length} items</span>
+            <span className="text-sm text-gray-600 dark:text-gray-400">
+              {currentList.length} item{currentList.length !== 1 ? 's' : ''}
+              {search && ' (filtered)'}
+            </span>
           </div>
         </div>
 
@@ -119,10 +137,12 @@ export default function ApprovalDashboard({ metrics, pending, overdue, escalated
             <div className="text-center py-12">
               <CheckCircle className="mx-auto h-12 w-12 text-gray-300 dark:text-gray-600 mb-4" />
               <p className="text-gray-600 dark:text-gray-400">
-                {activeTab === 'pending' ? 'All caught up — no pending requests' :
-                 activeTab === 'overdue' ? 'No overdue requests' :
-                 activeTab === 'escalated' ? 'No escalated requests' :
-                 'Nothing completed today yet'}
+                {search
+                  ? `No results for "${search}"`
+                  : activeTab === 'pending' ? 'All caught up — no pending requests' :
+                    activeTab === 'overdue' ? 'No overdue requests' :
+                    activeTab === 'escalated' ? 'No escalated requests' :
+                    'Nothing completed today yet'}
               </p>
             </div>
           )}

@@ -1,44 +1,49 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
+import { useEffect, useState } from 'react';
 import { createSupabaseBrowserClient } from '@/lib/supabase/client';
-import { CommShell } from '@/components/communication/comm-shell';
-import { getChannels, seedDefaultChannels } from '@/lib/actions/communication';
+import { seedDefaultChannels } from '@/lib/actions/communication';
+import { SlackShell } from '@/components/communication/slack-shell';
 import { BannerListSkeleton } from './skeletons';
 import type { SectionProps } from './types';
 
-export function CommunicationSection({ userId }: SectionProps) {
-  const { data } = useQuery({
-    queryKey: ['communication-data', userId],
-    queryFn: async () => {
+export function CommunicationSection({ userId, role }: SectionProps) {
+  const [name, setName]     = useState<string | null>(null);
+  const [ready, setReady]   = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
       const supabase = createSupabaseBrowserClient();
-      const profileRes = await supabase
+      const { data: profile } = await supabase
         .from('profiles')
-        .select('first_name, last_name, avatar_url')
+        .select('first_name, last_name')
         .eq('id', userId)
         .single();
 
-      let channelsResult = await getChannels();
-      if (channelsResult.success && channelsResult.data.length === 0) {
-        channelsResult = await seedDefaultChannels();
-      }
+      const displayName = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ') || 'You';
 
-      return {
-        channels: channelsResult.success ? channelsResult.data : [],
-        displayName: [profileRes.data?.first_name, profileRes.data?.last_name].filter(Boolean).join(' ') || 'You',
-      };
-    },
-  });
+      // Seed default channels on first load (no-op if they already exist)
+      await seedDefaultChannels();
+
+      if (active) { setName(displayName); setReady(true); }
+    })();
+    return () => { active = false; };
+  }, [userId]);
+
+  if (!ready) return (
+    <div className="flex-1 flex min-h-0 overflow-hidden p-4">
+      <BannerListSkeleton />
+    </div>
+  );
 
   return (
-    <div className="flex h-full min-h-0 overflow-hidden p-1">
-      {data ? (
-        <CommShell
-          initialChannels={data.channels as Parameters<typeof CommShell>[0]['initialChannels']}
-          currentUserId={userId}
-          currentUserName={data.displayName}
-        />
-      ) : <BannerListSkeleton />}
+    <div className="flex-1 flex min-h-0 overflow-hidden">
+      <SlackShell
+        currentUserId={userId}
+        currentUserName={name!}
+        role={role}
+      />
     </div>
   );
 }

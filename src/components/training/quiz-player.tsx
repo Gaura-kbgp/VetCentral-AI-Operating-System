@@ -183,7 +183,10 @@ export function QuizPlayer({ courseId, onClose, onPassed }: QuizPlayerProps) {
     setPhase('result');
   };
 
-  const answeredCount = Object.keys(answers).length;
+  // Essay questions count as answered even without input (auto full-marks)
+  const answeredCount = questions.filter(q =>
+    q.question_type === 'essay' || answers[q.id] !== undefined
+  ).length;
   const totalQs = questions.length;
   const q = questions[current];
 
@@ -289,37 +292,70 @@ export function QuizPlayer({ courseId, onClose, onPassed }: QuizPlayerProps) {
             <div className="flex-1 overflow-y-auto p-6 space-y-5">
               <div>
                 <p className="text-[11px] font-bold uppercase tracking-widest text-gray-400 mb-2">
-                  {q.question_type === 'true_false' ? 'True / False' : 'Multiple Choice'}
+                  {q.question_type === 'true_false'    ? 'True / False'
+                   : q.question_type === 'fill_in_blank' ? 'Fill in the Blank'
+                   : q.question_type === 'essay'        ? 'Detailed Answer'
+                   :                                      'Multiple Choice'}
                   {q.points > 1 && <span className="ml-2 text-orange-500">{q.points} pts</span>}
                 </p>
                 <p className="text-[16px] font-semibold text-gray-900 leading-snug">{q.question_text}</p>
               </div>
 
-              <div className="space-y-2.5">
-                {q.options.map(opt => {
-                  const selected = answers[q.id] === opt.id;
-                  return (
-                    <button
-                      key={opt.id}
-                      onClick={() => setAnswers(prev => ({ ...prev, [q.id]: opt.id }))}
-                      className={cn(
-                        'w-full text-left px-4 py-3.5 rounded-xl border-2 text-[14px] transition-all',
-                        selected
-                          ? 'border-orange-400 bg-orange-50 text-orange-800 font-medium'
-                          : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50',
-                      )}
-                    >
-                      <span className={cn(
-                        'inline-flex h-5 w-5 rounded-full border-2 mr-3 items-center justify-center text-[10px] font-bold shrink-0',
-                        selected ? 'border-orange-400 bg-orange-400 text-white' : 'border-gray-300',
-                      )}>
-                        {selected && '✓'}
-                      </span>
-                      {opt.text}
-                    </button>
-                  );
-                })}
-              </div>
+              {/* Multiple choice / true-false options */}
+              {(q.question_type === 'multiple_choice' || q.question_type === 'true_false') && (
+                <div className="space-y-2.5">
+                  {q.options.map(opt => {
+                    const selected = answers[q.id] === opt.id;
+                    return (
+                      <button
+                        key={opt.id}
+                        onClick={() => setAnswers(prev => ({ ...prev, [q.id]: opt.id }))}
+                        className={cn(
+                          'w-full text-left px-4 py-3.5 rounded-xl border-2 text-[14px] transition-all',
+                          selected
+                            ? 'border-orange-400 bg-orange-50 text-orange-800 font-medium'
+                            : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300 hover:bg-gray-50',
+                        )}
+                      >
+                        <span className={cn(
+                          'inline-flex h-5 w-5 rounded-full border-2 mr-3 items-center justify-center text-[10px] font-bold shrink-0',
+                          selected ? 'border-orange-400 bg-orange-400 text-white' : 'border-gray-300',
+                        )}>
+                          {selected && '✓'}
+                        </span>
+                        {opt.text}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Fill in the blank */}
+              {q.question_type === 'fill_in_blank' && (
+                <div>
+                  <input
+                    value={answers[q.id] ?? ''}
+                    onChange={e => setAnswers(prev => ({ ...prev, [q.id]: e.target.value }))}
+                    placeholder="Type your answer here…"
+                    className="w-full h-12 px-4 border-2 border-gray-200 rounded-xl text-[15px] focus:outline-none focus:border-orange-400 transition-colors"
+                  />
+                  <p className="text-[11px] text-gray-400 mt-1.5">Matching is case-insensitive</p>
+                </div>
+              )}
+
+              {/* Essay / detailed answer */}
+              {q.question_type === 'essay' && (
+                <div>
+                  <textarea
+                    value={answers[q.id] ?? ''}
+                    onChange={e => setAnswers(prev => ({ ...prev, [q.id]: e.target.value }))}
+                    rows={5}
+                    placeholder="Write your detailed answer here…"
+                    className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl text-[14px] focus:outline-none focus:border-orange-400 transition-colors resize-none"
+                  />
+                  <p className="text-[11px] text-gray-400 mt-1.5">This question will be awarded full marks automatically.</p>
+                </div>
+              )}
 
               {/* Error inline */}
               {error && (

@@ -1,5 +1,6 @@
 import { redirect, notFound } from 'next/navigation';
 import Link from 'next/link';
+import { BackButton } from '@/components/ui/back-button';
 import { createSupabaseServerClient, createSupabaseAdminClient } from '@/lib/supabase/server';
 import {
   getHospitalDetail,
@@ -9,7 +10,7 @@ import {
 } from '@/lib/actions/hospital-hub';
 import {
   Building2, Users, Layers, GraduationCap, MapPin,
-  Phone, Mail, Globe, ArrowLeft, CheckCircle2, AlertCircle, Clock,
+  Phone, Mail, Globe, CheckCircle2, AlertCircle, Clock,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -58,13 +59,12 @@ export default async function HospitalDetailPage({ params }: { params: Promise<{
   const activeStaff = employees.filter(e => e.is_active).length;
 
   return (
+    <div className="h-full overflow-y-auto">
     <div className="max-w-6xl mx-auto px-4 py-6 space-y-6">
 
       {/* Back + Header */}
       <div>
-        <Link href="/hospital-hub" className="inline-flex items-center gap-1.5 text-[13px] text-gray-500 hover:text-gray-700 mb-4">
-          <ArrowLeft className="h-3.5 w-3.5" /> Back to Hospital Hub
-        </Link>
+        <BackButton label="Back" className="mb-4" />
         <div className="flex items-start gap-4">
           <div
             className="h-12 w-12 rounded-xl flex items-center justify-center shrink-0 text-white font-bold text-lg"
@@ -201,6 +201,7 @@ export default async function HospitalDetailPage({ params }: { params: Promise<{
         </div>
       </div>
 
+    </div>
     </div>
   );
 }

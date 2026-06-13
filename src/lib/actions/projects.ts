@@ -1,13 +1,13 @@
 'use server';
 
-import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { createSupabaseServerClient, createSupabaseAdminClient } from '@/lib/supabase/server';
 import type { ActionResult } from '@/types/app';
 
 // ─────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────
 
-export type ProjectStatus   = 'planning' | 'active' | 'on_hold' | 'completed' | 'cancelled';
+export type ProjectStatus   = 'planning' | 'active' | 'on_hold' | 'review' | 'completed' | 'cancelled';
 export type ProjectPriority = 'low' | 'medium' | 'high' | 'urgent';
 export type TaskStatus      = 'todo' | 'in_progress' | 'review' | 'done' | 'cancelled';
 export type TaskPriority    = 'low' | 'medium' | 'high' | 'urgent';
@@ -917,6 +917,362 @@ export async function removeMember(projectId: string, userId: string): Promise<A
     .eq('project_id', projectId)
     .eq('user_id', userId);
 
+  if (error) return { success: false, error: error.message };
+  return { success: true, data: undefined };
+}
+
+// ─────────────────────────────────────────────────────────────
+// ── ENHANCED PROJECT SYSTEM (migration 025) ──────────────────
+// Uses admin client for all queries (bypasses RLS)
+// ─────────────────────────────────────────────────────────────
+
+export interface ProjectChecklistItem {
+  id: string;
+  text: string;
+  checked: boolean;
+  checked_at: string | null;
+}
+
+export interface ContributorInput {
+  userId: string;
+  contribution: string;
+}
+
+export interface ProjectContributor {
+  userId: string;
+  name: string;
+  avatar_url: string | null;
+  jobTitle: string | null;
+  contribution: string;
+  role: MemberRole;
+}
+
+export interface ProjectFull extends Project {
+  checklist: ProjectChecklistItem[];
+  contributors: ProjectContributor[];
+  reviewNote: string | null;
+  reviewRequestedAt: string | null;
+}
+
+export interface CreateProjectFullInput {
+  name: string;
+  description?: string | null;
+  priority?: ProjectPriority;
+  color?: string;
+  start_date?: string | null;
+  due_date?: string | null;
+  contributors: ContributorInput[];
+  checklist: string[];
+}
+
+// ── Admin context helper ──────────────────────────────────────
+
+async function getAdminCtx() {
+  const supabase = await createSupabaseServerClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
+  const admin = createSupabaseAdminClient();
+  const { data: profile } = await admin
+    .from('profiles')
+    .select('org_id,first_name,last_name')
+    .eq('id', user.id)
+    .single();
+  if (!profile?.org_id) return null;
+  return { user, admin, orgId: profile.org_id as string, profile };
+}
+
+const PROJECT_FULL_SEL = `
+  id,org_id,name,description,status,priority,color,start_date,due_date,
+  completed_at,progress_pct,is_cross_hospital,tags,created_by,owner_id,
+  created_at,updated_at,checklist,review_requested_at,review_note,hospital_id,department_id,
+  owner:owner_id(first_name,last_name,avatar_url)
+`;
+
+function mapProjectFull(
+  p: Record<string, unknown>,
+  contributors: ProjectContributor[],
+): ProjectFull {
+  const o = Array.isArray(p.owner)
+    ? (p.owner as Record<string, unknown>[])[0]
+    : (p.owner as Record<string, unknown> | null);
+  const checklist: ProjectChecklistItem[] = Array.isArray(p.checklist)
+    ? (p.checklist as ProjectChecklistItem[])
+    : [];
+  const done  = checklist.filter(i => i.checked).length;
+  const total = checklist.length;
+  return {
+    id:               p.id as string,
+    org_id:           p.org_id as string,
+    hospital_id:      (p.hospital_id as string | null) ?? null,
+    department_id:    (p.department_id as string | null) ?? null,
+    name:             p.name as string,
+    description:      (p.description as string | null) ?? null,
+    status:           p.status as ProjectStatus,
+    priority:         p.priority as ProjectPriority,
+    owner_id:         (p.owner_id as string | null) ?? null,
+    start_date:       (p.start_date as string | null) ?? null,
+    due_date:         (p.due_date as string | null) ?? null,
+    completed_at:     (p.completed_at as string | null) ?? null,
+    progress_pct:     total > 0 ? Math.round((done / total) * 100) : ((p.progress_pct as number) ?? 0),
+    color:            p.color as string,
+    is_cross_hospital: (p.is_cross_hospital as boolean) ?? false,
+    tags:             (p.tags as string[]) ?? [],
+    created_by:       (p.created_by as string | null) ?? null,
+    created_at:       p.created_at as string,
+    updated_at:       p.updated_at as string,
+    ownerName:        o ? `${o.first_name} ${o.last_name}` : null,
+    ownerAvatar:      (o?.avatar_url as string | null) ?? null,
+    taskCount:        0,
+    completedCount:   0,
+    memberCount:      contributors.length,
+    checklist,
+    contributors,
+    reviewNote:       (p.review_note as string | null) ?? null,
+    reviewRequestedAt:(p.review_requested_at as string | null) ?? null,
+  };
+}
+
+async function fetchContributors(
+  admin: ReturnType<typeof createSupabaseAdminClient>,
+  projectIds: string[],
+): Promise<Record<string, ProjectContributor[]>> {
+  if (!projectIds.length) return {};
+  const { data } = await admin
+    .from('project_members')
+    .select('project_id,user_id,role,contribution,profile:user_id(first_name,last_name,avatar_url,job_title)')
+    .in('project_id', projectIds);
+  const map: Record<string, ProjectContributor[]> = {};
+  for (const m of (data ?? []) as Record<string, unknown>[]) {
+    const pid = m.project_id as string;
+    if (!map[pid]) map[pid] = [];
+    const pr = Array.isArray(m.profile)
+      ? (m.profile as Record<string, unknown>[])[0]
+      : (m.profile as Record<string, unknown> | null);
+    map[pid].push({
+      userId:       m.user_id as string,
+      name:         pr ? `${pr.first_name} ${pr.last_name}` : 'Unknown',
+      avatar_url:   (pr?.avatar_url as string | null) ?? null,
+      jobTitle:     (pr?.job_title as string | null) ?? null,
+      contribution: (m.contribution as string) ?? '',
+      role:         m.role as MemberRole,
+    });
+  }
+  return map;
+}
+
+// ── Queries ───────────────────────────────────────────────────
+
+export async function getProjectsFull(): Promise<ActionResult<ProjectFull[]>> {
+  const c = await getAdminCtx();
+  if (!c) return { success: false, error: 'Unauthorized' };
+
+  const { data, error } = await c.admin
+    .from('projects')
+    .select(PROJECT_FULL_SEL)
+    .eq('org_id', c.orgId)
+    .order('created_at', { ascending: false });
+
+  if (error) return { success: false, error: error.message };
+
+  const pids = (data ?? []).map((p: Record<string, unknown>) => p.id as string);
+  const contribMap = await fetchContributors(c.admin, pids);
+
+  return {
+    success: true,
+    data: (data ?? []).map((p: Record<string, unknown>) =>
+      mapProjectFull(p, contribMap[p.id as string] ?? []),
+    ),
+  };
+}
+
+export async function getProjectFullById(id: string): Promise<ActionResult<ProjectFull>> {
+  const c = await getAdminCtx();
+  if (!c) return { success: false, error: 'Unauthorized' };
+
+  const { data: p, error } = await c.admin
+    .from('projects')
+    .select(PROJECT_FULL_SEL)
+    .eq('id', id)
+    .single();
+
+  if (error) return { success: false, error: error.message };
+  const contribMap = await fetchContributors(c.admin, [id]);
+  return { success: true, data: mapProjectFull(p as Record<string, unknown>, contribMap[id] ?? []) };
+}
+
+export async function getOrgMembersAdmin(): Promise<ActionResult<Array<{
+  id: string; name: string; avatar_url: string | null; jobTitle: string | null;
+}>>> {
+  const c = await getAdminCtx();
+  if (!c) return { success: false, error: 'Unauthorized' };
+
+  const { data, error } = await c.admin
+    .from('profiles')
+    .select('id,first_name,last_name,avatar_url,job_title')
+    .eq('org_id', c.orgId)
+    .eq('is_active', true)
+    .order('first_name');
+
+  if (error) return { success: false, error: error.message };
+  return {
+    success: true,
+    data: (data ?? []).map((p: Record<string, unknown>) => ({
+      id:         p.id as string,
+      name:       [p.first_name, p.last_name].filter(Boolean).join(' ') || 'Unknown',
+      avatar_url: (p.avatar_url as string | null) ?? null,
+      jobTitle:   (p.job_title as string | null) ?? null,
+    })),
+  };
+}
+
+// ── Mutations ─────────────────────────────────────────────────
+
+export async function createProjectFull(
+  input: CreateProjectFullInput,
+): Promise<ActionResult<ProjectFull>> {
+  const c = await getAdminCtx();
+  if (!c) return { success: false, error: 'Unauthorized' };
+
+  const checklist: ProjectChecklistItem[] = input.checklist
+    .filter(t => t.trim())
+    .map((text, i) => ({
+      id:         `cl_${Date.now()}_${i}`,
+      text:       text.trim(),
+      checked:    false,
+      checked_at: null,
+    }));
+
+  const { data: project, error } = await c.admin
+    .from('projects')
+    .insert({
+      org_id:       c.orgId,
+      name:         input.name.trim(),
+      description:  input.description?.trim() ?? null,
+      priority:     input.priority ?? 'medium',
+      color:        input.color ?? '#f97316',
+      start_date:   input.start_date ?? null,
+      due_date:     input.due_date ?? null,
+      status:       'active',
+      owner_id:     c.user.id,
+      created_by:   c.user.id,
+      checklist,
+      progress_pct: 0,
+    })
+    .select('id')
+    .single();
+
+  if (error) return { success: false, error: error.message };
+
+  const creatorContrib = input.contributors.find(co => co.userId === c.user.id);
+  const memberRows = [
+    {
+      project_id:   project.id,
+      user_id:      c.user.id,
+      role:         'owner' as MemberRole,
+      contribution: creatorContrib?.contribution?.trim() || 'Project owner',
+    },
+    ...input.contributors
+      .filter(co => co.userId !== c.user.id)
+      .map(co => ({
+        project_id:   project.id,
+        user_id:      co.userId,
+        role:         'member' as MemberRole,
+        contribution: co.contribution.trim(),
+      })),
+  ];
+
+  await c.admin.from('project_members').upsert(memberRows, { onConflict: 'project_id,user_id' });
+  return getProjectFullById(project.id);
+}
+
+export async function updateProjectChecklistItem(
+  projectId: string,
+  itemId: string,
+  checked: boolean,
+): Promise<ActionResult<ProjectFull>> {
+  const c = await getAdminCtx();
+  if (!c) return { success: false, error: 'Unauthorized' };
+
+  const { data: p } = await c.admin
+    .from('projects')
+    .select('checklist')
+    .eq('id', projectId)
+    .single();
+
+  if (!p) return { success: false, error: 'Project not found' };
+
+  const checklist: ProjectChecklistItem[] = Array.isArray((p as Record<string, unknown>).checklist)
+    ? ((p as Record<string, unknown>).checklist as ProjectChecklistItem[])
+    : [];
+
+  const updated = checklist.map(item =>
+    item.id === itemId
+      ? { ...item, checked, checked_at: checked ? new Date().toISOString() : null }
+      : item,
+  );
+
+  const done  = updated.filter(i => i.checked).length;
+  const total = updated.length;
+  const { error } = await c.admin
+    .from('projects')
+    .update({ checklist: updated, progress_pct: total > 0 ? Math.round((done / total) * 100) : 0 })
+    .eq('id', projectId);
+
+  if (error) return { success: false, error: error.message };
+  return getProjectFullById(projectId);
+}
+
+export async function submitProjectForReview(projectId: string): Promise<ActionResult<ProjectFull>> {
+  const c = await getAdminCtx();
+  if (!c) return { success: false, error: 'Unauthorized' };
+
+  const { error } = await c.admin.from('projects').update({
+    status:              'review',
+    review_requested_at: new Date().toISOString(),
+    review_requested_by: c.user.id,
+    review_note:         null,
+  }).eq('id', projectId);
+
+  if (error) return { success: false, error: error.message };
+  return getProjectFullById(projectId);
+}
+
+export async function approveProject(projectId: string): Promise<ActionResult<ProjectFull>> {
+  const c = await getAdminCtx();
+  if (!c) return { success: false, error: 'Unauthorized' };
+
+  const { error } = await c.admin.from('projects').update({
+    status:       'completed',
+    completed_at: new Date().toISOString(),
+    approved_by:  c.user.id,
+    progress_pct: 100,
+  }).eq('id', projectId);
+
+  if (error) return { success: false, error: error.message };
+  return getProjectFullById(projectId);
+}
+
+export async function rejectProjectReview(
+  projectId: string,
+  note: string,
+): Promise<ActionResult<ProjectFull>> {
+  const c = await getAdminCtx();
+  if (!c) return { success: false, error: 'Unauthorized' };
+
+  const { error } = await c.admin.from('projects').update({
+    status:      'active',
+    review_note: note.trim(),
+  }).eq('id', projectId);
+
+  if (error) return { success: false, error: error.message };
+  return getProjectFullById(projectId);
+}
+
+export async function deleteProjectFull(projectId: string): Promise<ActionResult<void>> {
+  const c = await getAdminCtx();
+  if (!c) return { success: false, error: 'Unauthorized' };
+
+  const { error } = await c.admin.from('projects').delete().eq('id', projectId);
   if (error) return { success: false, error: error.message };
   return { success: true, data: undefined };
 }

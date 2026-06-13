@@ -4,11 +4,15 @@ import { useState } from 'react';
 import {
   CalendarDays, Package, GraduationCap, FileText, Clock, CheckCircle2,
   XCircle, AlertCircle, ChevronRight, Loader2, X, Send, Inbox,
+  Stethoscope, ClipboardList,
 } from 'lucide-react';
 import {
   createLeaveRequest, createEquipmentRequest, createTrainingRequest,
   createDocumentRequest, getMyRequests, type RequestSummary,
 } from '@/lib/actions/requests';
+import { DirectRequestsShell } from './direct-requests-shell';
+import type { DirectRequest } from '@/lib/actions/direct-requests';
+import type { AppRole } from '@/types/database';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 // DB check: 'vacation' | 'sick' | 'personal' | 'bereavement' | 'parental' | 'unpaid' | 'other'
@@ -451,16 +455,31 @@ function DocumentForm({ onSuccess, onClose }: { onSuccess: () => void; onClose: 
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
+
+const ADMIN_ROLES_PORTAL: AppRole[] = ['super_admin', 'org_admin', 'hospital_admin', 'practice_manager', 'hr'];
+
 interface RequestsPortalShellProps {
   initialRequests: PortalRequest[];
+  initialInbox: DirectRequest[];
+  initialSent: DirectRequest[];
+  role: AppRole | null;
+  currentUserId: string;
 }
 
-export function RequestsPortalShell({ initialRequests }: RequestsPortalShellProps) {
+type MainTab = 'my-requests' | 'inbox' | 'sent';
+
+export function RequestsPortalShell({
+  initialRequests, initialInbox, initialSent, role, currentUserId,
+}: RequestsPortalShellProps) {
+  const [mainTab, setMainTab]       = useState<MainTab>('my-requests');
   const [modal, setModal]           = useState<RequestModal | null>(null);
   const [requests, setRequests]     = useState<PortalRequest[]>(initialRequests);
   const [loadingReqs, setLoading]   = useState(false);
   const [successMsg, setSuccess]    = useState<string | null>(null);
   const [filterStatus, setFilter]   = useState<string>('all');
+  const [inboxUnread, setInboxUnread] = useState(initialInbox.filter(r => !r.read_at).length);
+
+  const isAdmin = !!role && ADMIN_ROLES_PORTAL.includes(role);
 
   const MODAL_LABELS: Record<RequestModal['kind'], string> = {
     leave: 'Leave Request', equipment: 'Equipment Request',
@@ -475,7 +494,6 @@ export function RequestsPortalShell({ initialRequests }: RequestsPortalShellProp
     setModal(null);
     setSuccess(`${label} submitted successfully. You'll be notified when it's reviewed.`);
     setTimeout(() => setSuccess(null), 5000);
-    // Refresh requests list
     setLoading(true);
     const r = await getMyRequests();
     if (r.success) setRequests(r.data);
@@ -507,127 +525,192 @@ export function RequestsPortalShell({ initialRequests }: RequestsPortalShellProp
     <div className="flex flex-col min-h-0 h-full overflow-hidden">
 
       {/* ── Header ─────────────────────────────────────────────────────────── */}
-      <div className="shrink-0 px-6 py-5 border-b border-slate-100 bg-white">
-        <div className="flex items-center gap-3">
+      <div className="shrink-0 px-6 py-4 border-b border-slate-100 bg-white">
+        <div className="flex items-center gap-3 mb-3">
           <div className="w-10 h-10 rounded-xl bg-[#1e3a5f] flex items-center justify-center shrink-0">
             <Inbox className="h-5 w-5 text-white" />
           </div>
           <div>
             <h1 className="text-lg font-bold text-slate-900">My Requests</h1>
-            <p className="text-[12px] text-slate-400">Submit and track your workplace requests</p>
+            <p className="text-[12px] text-slate-400">Submit, track and respond to workplace requests</p>
           </div>
+        </div>
+        {/* Tab Bar */}
+        <div className="flex gap-1 bg-slate-100 rounded-xl p-1 w-fit">
+          {(['my-requests', 'inbox', 'sent'] as MainTab[]).map(t => (
+            <button key={t} onClick={() => setMainTab(t)}
+              className={`relative h-8 px-4 rounded-lg text-[12.5px] font-semibold transition-colors ${
+                mainTab === t ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+              }`}>
+              {t === 'my-requests' ? 'My Requests' : t === 'inbox' ? 'Inbox' : 'Sent'}
+              {t === 'inbox' && inboxUnread > 0 && (
+                <span className="absolute -top-1 -right-1 h-4 min-w-4 px-1 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center">
+                  {inboxUnread}
+                </span>
+              )}
+            </button>
+          ))}
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto">
-        <div className="max-w-4xl mx-auto px-6 py-6 space-y-6">
+      {/* ── Inbox / Sent Tab — always mounted so internal state is preserved ── */}
+      <div className={mainTab === 'my-requests' ? 'hidden' : 'flex flex-col flex-1 min-h-0 overflow-hidden'}>
+        <DirectRequestsShell
+          currentUserId={currentUserId}
+          role={role}
+          initialInbox={initialInbox}
+          initialSent={initialSent}
+          defaultTab={mainTab === 'sent' ? 'sent' : 'inbox'}
+          onUnreadChange={setInboxUnread}
+        />
+      </div>
 
-          {/* Success toast */}
-          {successMsg && (
-            <div className="flex items-center gap-3 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3">
-              <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
-              <p className="text-sm text-emerald-700 flex-1">{successMsg}</p>
-              <button onClick={() => setSuccess(null)} className="text-emerald-400 hover:text-emerald-600"><X className="h-4 w-4" /></button>
-            </div>
-          )}
+      {/* ── My Requests Tab ───────────────────────────────────────────────── */}
+      {mainTab === 'my-requests' && (
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          <div className="max-w-4xl mx-auto px-6 py-6 space-y-6">
 
-          {/* Request type tiles */}
-          <div>
-            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-3">New Request</p>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              {REQUEST_TILES.map(tile => {
-                const { Icon } = tile;
-                return (
-                  <button key={tile.kind} onClick={() => setModal({ kind: tile.kind })}
-                    className={`group flex flex-col items-start gap-3 p-4 rounded-2xl border-2 ${tile.bg} ${tile.border} hover:shadow-md hover:-translate-y-0.5 transition-all text-left`}>
-                    <div className={`w-10 h-10 rounded-xl ${tile.iconBg} flex items-center justify-center`}>
-                      <Icon className="h-5 w-5" style={{ color: tile.color }} />
-                    </div>
-                    <div>
-                      <p className="text-[13px] font-bold text-slate-800 leading-tight">{tile.label}</p>
-                      <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">{tile.desc}</p>
-                    </div>
-                    <ChevronRight className="h-4 w-4 text-slate-400 group-hover:translate-x-0.5 transition-transform mt-auto" />
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* My requests history */}
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">My Requests</p>
-              <div className="flex items-center gap-1">
-                {FILTER_OPTS.map(f => (
-                  <button key={f.value} onClick={() => setFilter(f.value)}
-                    className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all ${
-                      filterStatus === f.value ? 'bg-[#1e3a5f] text-white' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-700'
-                    }`}>
-                    {f.label}
-                    {f.count != null && f.count > 0 && (
-                      <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] ${filterStatus === f.value ? 'bg-white/20' : 'bg-slate-200 text-slate-600'}`}>
-                        {f.count}
-                      </span>
-                    )}
-                  </button>
-                ))}
+            {successMsg && (
+              <div className="flex items-center gap-3 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3">
+                <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" />
+                <p className="text-sm text-emerald-700 flex-1">{successMsg}</p>
+                <button onClick={() => setSuccess(null)} className="text-emerald-400 hover:text-emerald-600"><X className="h-4 w-4" /></button>
               </div>
-            </div>
+            )}
 
-            {loadingReqs ? (
-              <div className="flex items-center justify-center py-12">
-                <Loader2 className="h-6 w-6 animate-spin text-slate-300" />
-              </div>
-            ) : filteredRequests.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-12 text-center bg-slate-50 rounded-2xl border border-slate-100">
-                <div className="w-12 h-12 rounded-xl bg-white border border-slate-200 flex items-center justify-center mb-3">
-                  <Inbox className="h-6 w-6 text-slate-300" />
-                </div>
-                <p className="text-sm font-semibold text-slate-500">No requests{filterStatus !== 'all' ? ` with status "${filterStatus}"` : ' yet'}</p>
-                <p className="text-[12px] text-slate-400 mt-1">Use the tiles above to submit a new request.</p>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {filteredRequests.map(req => {
-                  const meta   = STATUS_META[req.status] ?? STATUS_META.pending;
-                  const TypeIcon = typeIcon(req.request_type);
+            {/* Standard request tiles */}
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-3">New Request</p>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                {REQUEST_TILES.map(tile => {
+                  const { Icon } = tile;
                   return (
-                    <div key={req.id}
-                      className="flex items-center gap-4 bg-white border border-slate-100 rounded-2xl px-4 py-3.5 hover:shadow-sm hover:border-slate-200 transition-all">
-                      <div className="w-9 h-9 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-center shrink-0">
-                        <TypeIcon className="h-4 w-4 text-slate-500" />
+                    <button key={tile.kind} onClick={() => setModal({ kind: tile.kind })}
+                      className={`group flex flex-col items-start gap-3 p-4 rounded-2xl border-2 ${tile.bg} ${tile.border} hover:shadow-md hover:-translate-y-0.5 transition-all text-left`}>
+                      <div className={`w-10 h-10 rounded-xl ${tile.iconBg} flex items-center justify-center`}>
+                        <Icon className="h-5 w-5" style={{ color: tile.color }} />
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <p className="text-[13px] font-semibold text-slate-800">
-                            {req.title ?? (TYPE_LABELS[req.request_type] ?? req.request_type) + ' Request'}
-                          </p>
-                          {req.priority && req.priority !== 'medium' && (
-                            <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${
-                              req.priority === 'urgent' ? 'bg-red-50 text-red-600' :
-                              req.priority === 'high'   ? 'bg-orange-50 text-orange-600' :
-                                                          'bg-slate-100 text-slate-500'
-                            }`}>{req.priority}</span>
-                          )}
-                        </div>
-                        {req.description && <p className="text-[12px] text-slate-400 truncate mt-0.5">{req.description}</p>}
-                        <p className="text-[11px] text-slate-400 mt-0.5">{formatDate(req.created_at)}</p>
+                      <div>
+                        <p className="text-[13px] font-bold text-slate-800 leading-tight">{tile.label}</p>
+                        <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">{tile.desc}</p>
                       </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <span className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold ${meta.color}`}>
-                          <meta.Icon className="h-3 w-3" />
-                          {meta.label}
-                        </span>
-                      </div>
-                    </div>
+                      <ChevronRight className="h-4 w-4 text-slate-400 group-hover:translate-x-0.5 transition-transform mt-auto" />
+                    </button>
                   );
                 })}
               </div>
+            </div>
+
+            {/* Admin-only direct request tiles */}
+            {isAdmin && (
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-3">Request From Employee</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={() => { setMainTab('sent'); }}
+                    className="group flex flex-col items-start gap-3 p-4 rounded-2xl border-2 bg-red-50 border-red-100 hover:shadow-md hover:-translate-y-0.5 transition-all text-left"
+                  >
+                    <div className="w-10 h-10 rounded-xl bg-red-100 flex items-center justify-center">
+                      <Stethoscope className="h-5 w-5 text-red-600" />
+                    </div>
+                    <div>
+                      <p className="text-[13px] font-bold text-slate-800 leading-tight">Medical Certificate</p>
+                      <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">Request medical certificate from employee</p>
+                    </div>
+                    <ChevronRight className="h-4 w-4 text-slate-400 group-hover:translate-x-0.5 transition-transform mt-auto" />
+                  </button>
+                  <button
+                    onClick={() => { setMainTab('sent'); }}
+                    className="group flex flex-col items-start gap-3 p-4 rounded-2xl border-2 bg-amber-50 border-amber-100 hover:shadow-md hover:-translate-y-0.5 transition-all text-left"
+                  >
+                    <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center">
+                      <ClipboardList className="h-5 w-5 text-amber-600" />
+                    </div>
+                    <div>
+                      <p className="text-[13px] font-bold text-slate-800 leading-tight">Work Details Report</p>
+                      <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">Request work report or activity summary</p>
+                    </div>
+                    <ChevronRight className="h-4 w-4 text-slate-400 group-hover:translate-x-0.5 transition-transform mt-auto" />
+                  </button>
+                </div>
+              </div>
             )}
+
+            {/* My requests history */}
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400">My Requests</p>
+                <div className="flex items-center gap-1">
+                  {FILTER_OPTS.map(f => (
+                    <button key={f.value} onClick={() => setFilter(f.value)}
+                      className={`px-3 py-1.5 rounded-lg text-[11px] font-semibold transition-all ${
+                        filterStatus === f.value ? 'bg-[#1e3a5f] text-white' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-700'
+                      }`}>
+                      {f.label}
+                      {f.count != null && f.count > 0 && (
+                        <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] ${filterStatus === f.value ? 'bg-white/20' : 'bg-slate-200 text-slate-600'}`}>
+                          {f.count}
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {loadingReqs ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="h-6 w-6 animate-spin text-slate-300" />
+                </div>
+              ) : filteredRequests.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-12 text-center bg-slate-50 rounded-2xl border border-slate-100">
+                  <div className="w-12 h-12 rounded-xl bg-white border border-slate-200 flex items-center justify-center mb-3">
+                    <Inbox className="h-6 w-6 text-slate-300" />
+                  </div>
+                  <p className="text-sm font-semibold text-slate-500">No requests{filterStatus !== 'all' ? ` with status "${filterStatus}"` : ' yet'}</p>
+                  <p className="text-[12px] text-slate-400 mt-1">Use the tiles above to submit a new request.</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {filteredRequests.map(req => {
+                    const meta   = STATUS_META[req.status] ?? STATUS_META.pending;
+                    const TypeIcon = typeIcon(req.request_type);
+                    return (
+                      <div key={req.id}
+                        className="flex items-center gap-4 bg-white border border-slate-100 rounded-2xl px-4 py-3.5 hover:shadow-sm hover:border-slate-200 transition-all">
+                        <div className="w-9 h-9 rounded-xl bg-slate-50 border border-slate-100 flex items-center justify-center shrink-0">
+                          <TypeIcon className="h-4 w-4 text-slate-500" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="text-[13px] font-semibold text-slate-800">
+                              {req.title ?? (TYPE_LABELS[req.request_type] ?? req.request_type) + ' Request'}
+                            </p>
+                            {req.priority && req.priority !== 'medium' && (
+                              <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${
+                                req.priority === 'urgent' ? 'bg-red-50 text-red-600' :
+                                req.priority === 'high'   ? 'bg-orange-50 text-orange-600' :
+                                                            'bg-slate-100 text-slate-500'
+                              }`}>{req.priority}</span>
+                            )}
+                          </div>
+                          {req.description && <p className="text-[12px] text-slate-400 truncate mt-0.5">{req.description}</p>}
+                          <p className="text-[11px] text-slate-400 mt-0.5">{formatDate(req.created_at)}</p>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-[11px] font-semibold ${meta.color}`}>
+                            <meta.Icon className="h-3 w-3" />
+                            {meta.label}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* ── Request Modal ────────────────────────────────────────────────────── */}
       {modal && (

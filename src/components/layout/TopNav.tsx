@@ -1,11 +1,28 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
-import { Search, Calendar, Bell, Mail, X, Check } from 'lucide-react';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import {
+  Search, Calendar, Bell, Mail, X, Check,
+  ArrowRight, Hash,
+  BookOpen, GraduationCap, CheckSquare, MessageSquare, ClipboardList,
+  FolderKanban, BarChart2, Building2, Building, Users, FileText,
+  ClipboardCheck, Sparkles, Bell as BellIcon, BellRing, UserPlus, UserCog,
+  LayoutDashboard, ShieldCheck, LayoutGrid, ScrollText, SlidersHorizontal,
+  Lock, Cpu, CircleUser, CircleHelp, GitBranch, Puzzle,
+} from 'lucide-react';
 import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 import { useSPANavigation } from '@/contexts/spa-navigation';
 import AccountMenu, { type AccountMenuProfile } from './AccountMenu';
 import type { AppRole } from '@/types/database';
+import { getSuggestions, type SearchItem } from '@/lib/nav-search';
+
+const ICON_MAP: Record<string, React.ElementType> = {
+  Calendar, Sparkles, BookOpen, GraduationCap, CheckSquare,
+  Bell: BellIcon, BellRing, MessageSquare, ClipboardList, FolderKanban, BarChart2,
+  Building2, Building, Users, FileText, ClipboardCheck, Hash, UserPlus, UserCog,
+  LayoutDashboard, ShieldCheck, LayoutGrid, ScrollText, SlidersHorizontal,
+  Lock, Cpu, CircleUser, CircleHelp, GitBranch, Puzzle,
+};
 
 interface Notification {
   id: string;
@@ -26,16 +43,55 @@ interface TopNavProps {
 function TopNavInner({ user, role, unreadCount = 0 }: TopNavProps) {
   const { navigate } = useSPANavigation();
   const supabase = createSupabaseBrowserClient();
-  const [query, setQuery] = useState('');
+
+  // ── Search state ──
+  const [query, setQuery]             = useState('');
+  const [suggestions, setSuggestions] = useState<SearchItem[]>([]);
+  const [activeIdx, setActiveIdx]     = useState(-1);
+  const [searchOpen, setSearchOpen]   = useState(false);
+  const searchRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const results = getSuggestions(query, 6);
+    setSuggestions(results);
+    setActiveIdx(-1);
+    setSearchOpen(results.length > 0);
+  }, [query]);
+
+  useEffect(() => {
+    function onOutside(e: MouseEvent) {
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
+        setSearchOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', onOutside);
+    return () => document.removeEventListener('mousedown', onOutside);
+  }, []);
+
+  const go = useCallback((item: SearchItem) => {
+    navigate(item.section, item.subId ?? null);
+    setQuery('');
+    setSearchOpen(false);
+  }, [navigate]);
+
+  function handleSearchSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (activeIdx >= 0 && suggestions[activeIdx]) { go(suggestions[activeIdx]); return; }
+    if (suggestions.length > 0) { go(suggestions[0]); return; }
+    if (query.trim()) { navigate('knowledge-base', query.trim()); setQuery(''); }
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent) {
+    if (e.key === 'ArrowDown') { e.preventDefault(); setActiveIdx(i => Math.min(i + 1, suggestions.length - 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setActiveIdx(i => Math.max(i - 1, -1)); }
+    else if (e.key === 'Escape') { setSearchOpen(false); setActiveIdx(-1); }
+  }
+
+  // ── Notifications state ──
   const [bellOpen, setBellOpen] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [localUnread, setLocalUnread] = useState(unreadCount);
   const bellRef = useRef<HTMLDivElement>(null);
-
-  function handleSearch(e: React.FormEvent) {
-    e.preventDefault();
-    if (query.trim()) navigate('knowledge-base');
-  }
 
   async function openBell() {
     setBellOpen(v => !v);
@@ -82,17 +138,58 @@ function TopNavInner({ user, role, unreadCount = 0 }: TopNavProps) {
     <header className="relative z-20 flex items-center h-[60px] px-6 bg-white dark:bg-gray-900 border-b border-slate-200/80 dark:border-gray-800 shrink-0 gap-4 shadow-[0_1px_3px_0_rgba(0,0,0,0.05)]">
 
       {/* Search bar */}
-      <form onSubmit={handleSearch} className="flex-1 max-w-md">
-        <div className="flex items-center gap-2 bg-slate-50 dark:bg-gray-800 border border-slate-200 dark:border-gray-700 rounded-lg px-3 py-2 hover:border-slate-300 focus-within:border-[#2563eb] focus-within:bg-white focus-within:ring-2 focus-within:ring-blue-100 dark:hover:border-gray-600 transition-all">
-          <Search className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-          <input
-            value={query}
-            onChange={e => setQuery(e.target.value)}
-            placeholder="Search VetCentral..."
-            className="flex-1 text-[13px] bg-transparent outline-none text-gray-700 dark:text-gray-200 placeholder:text-slate-400 dark:placeholder:text-gray-500"
-          />
-        </div>
-      </form>
+      <div className="relative flex-1 max-w-md" ref={searchRef}>
+        <form onSubmit={handleSearchSubmit}>
+          <div className={`flex items-center gap-2 bg-slate-50 dark:bg-gray-800 border border-slate-200 dark:border-gray-700 rounded-lg px-3 py-2 transition-all hover:border-slate-300 focus-within:border-[#2563eb] focus-within:bg-white focus-within:ring-2 focus-within:ring-blue-100 dark:hover:border-gray-600 ${searchOpen ? 'rounded-b-none border-b-transparent' : ''}`}>
+            <Search className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+            <input
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              onKeyDown={handleKeyDown}
+              onFocus={() => { if (suggestions.length > 0) setSearchOpen(true); }}
+              placeholder="Search sections, tasks, SOPs…"
+              className="flex-1 text-[13px] bg-transparent outline-none text-gray-700 dark:text-gray-200 placeholder:text-slate-400 dark:placeholder:text-gray-500"
+              autoComplete="off"
+            />
+            {query && (
+              <button type="button" onClick={() => { setQuery(''); setSearchOpen(false); }} className="text-slate-300 hover:text-slate-500">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+        </form>
+
+        {/* Suggestions dropdown */}
+        {searchOpen && suggestions.length > 0 && (
+          <div className="absolute top-full left-0 right-0 z-50 bg-white dark:bg-gray-900 border border-slate-200 dark:border-gray-700 border-t-0 rounded-b-xl shadow-xl overflow-hidden">
+            {suggestions.map((item, idx) => {
+              const Icon = ICON_MAP[item.iconKey] ?? Hash;
+              const isActive = idx === activeIdx;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onMouseDown={() => go(item)}
+                  onMouseEnter={() => setActiveIdx(idx)}
+                  className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-left transition-colors ${isActive ? 'bg-slate-50 dark:bg-gray-800' : 'hover:bg-slate-50 dark:hover:bg-gray-800'}`}
+                >
+                  <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: item.iconBg }}>
+                    <Icon className="h-3.5 w-3.5" style={{ color: item.iconColor }} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[12px] font-semibold text-gray-800 dark:text-gray-200 truncate">{item.label}</p>
+                    <p className="text-[10px] text-gray-400 truncate">{item.description}</p>
+                  </div>
+                  {isActive && <ArrowRight className="h-3 w-3 text-gray-400 shrink-0" />}
+                </button>
+              );
+            })}
+            <div className="px-3 py-2 bg-slate-50 dark:bg-gray-800 border-t border-slate-100 dark:border-gray-700 flex items-center gap-2">
+              <span className="text-[10px] text-gray-400">↑↓ navigate · ↵ select · esc close</span>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Right icons */}
       <div className="flex items-center gap-1 ml-auto">
