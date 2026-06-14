@@ -399,9 +399,9 @@ function ProjectDetailView({
     && project.status !== 'completed' && project.status !== 'cancelled';
 
   return (
-    <div className="h-full flex flex-col overflow-hidden">
-      {/* ── Sticky header ──────────────────────────────────── */}
-      <div className="shrink-0 bg-white border-b border-slate-100 px-6 py-4">
+    <div className="flex flex-col -mx-6 -mt-6">
+      {/* ── Header ──────────────────────────────────── */}
+      <div className="bg-white border-b border-slate-100 px-6 py-4">
         <div className="flex items-center gap-4 flex-wrap">
           <button
             onClick={onBack}
@@ -498,8 +498,8 @@ function ProjectDetailView({
         </div>
       </div>
 
-      {/* ── Scrollable content ─────────────────────────────── */}
-      <div className="flex-1 overflow-y-auto px-6 py-6">
+      {/* ── Content ─────────────────────────────── */}
+      <div className="px-6 py-6 pb-10">
 
         {/* OVERVIEW TAB */}
         {tab === 'overview' && (
@@ -1298,9 +1298,9 @@ export default function ProjectsShell({ projects: initialProjects, role, current
   // ── List View ─────────────────────────────────────────────
   return (
     <>
-      <div className="h-full flex flex-col overflow-hidden">
-        {/* Sticky header */}
-        <div className="shrink-0 bg-white border-b border-slate-100 shadow-sm">
+      <div className="flex flex-col -mx-6 -mt-6">
+        {/* Header */}
+        <div className="bg-white border-b border-slate-100 shadow-sm">
           <div className="px-6 pt-5 pb-4">
             {/* Title row */}
             <div className="flex items-center justify-between mb-5">
@@ -1370,8 +1370,8 @@ export default function ProjectsShell({ projects: initialProjects, role, current
           </div>
         </div>
 
-        {/* Scrollable content */}
-        <div className="flex-1 overflow-y-auto px-6 py-5">
+        {/* Content */}
+        <div className="px-6 py-5 pb-8">
           {filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-64 text-center">
               <div className="h-16 w-16 bg-slate-50 rounded-2xl flex items-center justify-center mb-4">

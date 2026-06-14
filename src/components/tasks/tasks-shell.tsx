@@ -791,7 +791,7 @@ export function TasksShell({ role, currentUserId, assignedByMe, myReceivedTasks 
   const receivedCount = receivedTasks.filter(t => t.status !== 'done' && t.status !== 'cancelled').length;
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+    <div className="flex flex-col -mx-6 -mt-6">
       {/* ── Header ── */}
       <div className="shrink-0 px-6 py-5 bg-[#1e3a5f] flex items-center justify-between gap-4">
         <div className="flex items-center gap-3">
@@ -899,7 +899,7 @@ export function TasksShell({ role, currentUserId, assignedByMe, myReceivedTasks 
       </div>
 
       {/* ── Task Feed ── */}
-      <div className="flex-1 min-h-0 overflow-y-auto px-6 py-4 space-y-3">
+      <div className="px-6 py-4 space-y-3 pb-8">
         {feed.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-3 py-20">
             <div className="h-16 w-16 rounded-2xl bg-slate-100 flex items-center justify-center">

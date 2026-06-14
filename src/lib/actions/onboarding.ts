@@ -651,12 +651,37 @@ export async function createOnboardingRecord(input: CreateRecordInput): Promise<
   return getOnboardingRecord(input.employee_id);
 }
 
+// Stage order used for progress calculation — must match OnboardingStage union
+const STAGE_ORDER: OnboardingStage[] = [
+  'pre_hire', 'documents', 'orientation', 'training', 'manager_review', 'completed',
+];
+
 export async function updateOnboardingRecord(id: string, input: UpdateRecordInput): Promise<ActionResult<OnboardingRecord>> {
   const { admin, user, orgId } = await getCtx();
   if (!user || !orgId) return { success: false, error: 'Unauthorized' };
 
   const update: Record<string, unknown> = { ...input };
   if (input.stage === 'completed') update.completed_at = new Date().toISOString();
+
+  // When a stage is being set, recalculate progress_pct:
+  // Use task-based progress if tasks exist, otherwise use stage position.
+  if (input.stage) {
+    const { data: tasks } = await admin
+      .from('onboarding_tasks')
+      .select('status')
+      .eq('record_id', id);
+
+    const total = (tasks ?? []).length;
+    if (total > 0) {
+      const done = (tasks ?? []).filter((t: { status: string }) => t.status === 'completed').length;
+      update.progress_pct = Math.round((done / total) * 100);
+    } else {
+      // No tasks — derive progress from stage position
+      const stageIdx  = STAGE_ORDER.indexOf(input.stage as OnboardingStage);
+      const lastIdx   = STAGE_ORDER.length - 1;
+      update.progress_pct = stageIdx < 0 ? 0 : Math.round((stageIdx / lastIdx) * 100);
+    }
+  }
 
   const { error } = await admin.from('onboarding_records').update(update).eq('id', id);
   if (error) return { success: false, error: error.message };

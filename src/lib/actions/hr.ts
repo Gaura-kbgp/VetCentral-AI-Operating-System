@@ -700,3 +700,343 @@ export async function getEmployeesInOnboarding(): Promise<{
     return { employees: [], error: err instanceof Error ? err.message : 'Error' };
   }
 }
+
+// ── Real Attendance ───────────────────────────────────────────────────────────
+
+export type AttendanceStatus = 'present' | 'late' | 'absent' | 'on_leave' | 'remote';
+
+export interface AttendanceEmployeeWithStatus {
+  id: string;
+  name: string;
+  role: string;
+  department: string | null;
+  avatar_url: string | null;
+  hospital_id: string;
+  hospital_name: string;
+  hospital_color: string | null;
+  attendance_id: string | null;
+  status: AttendanceStatus;
+  check_in_time: string | null;
+  check_out_time: string | null;
+  notes: string | null;
+}
+
+const MOCK_STATUSES: AttendanceStatus[] = [
+  'present','present','present','late','present','remote','absent','on_leave','present','present',
+];
+
+function mockCheckIn(status: AttendanceStatus, idx: number): string | null {
+  const base = new Date();
+  base.setHours(0, 0, 0, 0);
+  if (status === 'present') return new Date(base.getTime() + (8 * 60 + 15 + idx % 45) * 60000).toISOString();
+  if (status === 'late')    return new Date(base.getTime() + (9 * 60 + 10 + idx % 45) * 60000).toISOString();
+  if (status === 'remote')  return new Date(base.getTime() + (8 * 60 + 30 + idx % 20) * 60000).toISOString();
+  return null;
+}
+
+export async function getAttendanceForToday(forDate?: string): Promise<{
+  employees: AttendanceEmployeeWithStatus[];
+  hospitals: Array<{ id: string; name: string; color: string | null }>;
+  date: string;
+  hasRealData: boolean;
+  error?: string;
+}> {
+  const admin = createSupabaseAdminClient();
+  const today = forDate ?? new Date().toISOString().split('T')[0];
+
+  try {
+    // user_hospital_roles has granted_at (not created_at) — no ordering needed
+    const [hospRes, rolesRes] = await Promise.all([
+      admin.from('hospitals').select('id,name,color').order('name'),
+      admin.from('user_hospital_roles').select('user_id, role, hospital_id'),
+    ]);
+
+    const profileIds = [...new Set((rolesRes.data ?? []).map((r: { user_id: string }) => r.user_id))];
+
+    const profilesRes = profileIds.length > 0
+      ? await admin.from('profiles')
+          .select('id, first_name, last_name, department, avatar_url, is_active')
+          .in('id', profileIds)
+          .neq('is_active', false)   // include NULL and true, exclude explicit false
+      : { data: [] as { id: string; first_name: string | null; last_name: string | null; department: string | null; avatar_url: string | null; is_active: boolean | null }[] };
+
+    // Attendance query — graceful fallback: Supabase returns error object (not throw) if table missing
+    const { data: attData } = await admin
+      .from('attendance_records')
+      .select('id, employee_id, status, check_in_time, check_out_time, notes')
+      .eq('date', today);
+
+    const hasRealData = (attData ?? []).length > 0;
+    const hospitals   = (hospRes.data ?? []).map(h => ({ id: h.id, name: h.name, color: h.color ?? null }));
+    const hospitalMap = new Map(hospitals.map(h => [h.id, h]));
+    const profileSet  = new Set((profilesRes.data ?? []).map(p => p.id));
+    const profileMap  = new Map((profilesRes.data ?? []).map(p => [p.id, p]));
+    const attMap      = new Map((attData ?? []).map(a => [a.employee_id as string, a]));
+
+    const seen = new Set<string>();
+    const employees: AttendanceEmployeeWithStatus[] = [];
+    let mockIdx = 0;
+
+    for (const r of (rolesRes.data ?? [])) {
+      if (seen.has(r.user_id) || !profileSet.has(r.user_id)) continue;
+      seen.add(r.user_id);
+      const profile = profileMap.get(r.user_id);
+      const hosp    = hospitalMap.get(r.hospital_id);
+      if (!profile || !hosp) continue;
+
+      const att    = attMap.get(r.user_id);
+      const status: AttendanceStatus = att
+        ? (att.status as AttendanceStatus)
+        : hasRealData
+          ? 'absent'
+          : MOCK_STATUSES[mockIdx % MOCK_STATUSES.length];
+
+      const check_in_time  = att ? (att.check_in_time as string | null)  : (!hasRealData ? mockCheckIn(status, mockIdx) : null);
+      const check_out_time = att ? (att.check_out_time as string | null) : null;
+
+      employees.push({
+        id:             r.user_id,
+        name:           [profile.first_name, profile.last_name].filter(Boolean).join(' ') || 'Unknown',
+        role:           r.role ?? 'staff',
+        department:     profile.department ?? null,
+        avatar_url:     profile.avatar_url ?? null,
+        hospital_id:    r.hospital_id,
+        hospital_name:  hosp.name,
+        hospital_color: hosp.color ?? null,
+        attendance_id:  att ? (att.id as string) : null,
+        status,
+        check_in_time,
+        check_out_time,
+        notes:          att ? ((att as { notes?: string | null }).notes ?? null) : null,
+      });
+      mockIdx++;
+    }
+
+    return { employees, hospitals, date: today, hasRealData };
+  } catch (err) {
+    return { employees: [], hospitals: [], date: today, hasRealData: false, error: err instanceof Error ? err.message : 'Unknown error' };
+  }
+}
+
+export async function upsertAttendanceRecord(
+  employeeId: string,
+  status: AttendanceStatus,
+  checkInTime?: string | null,
+): Promise<{ success: boolean; error?: string }> {
+  const admin = createSupabaseAdminClient();
+  const today = new Date().toISOString().split('T')[0];
+  try {
+    const supabase = await createSupabaseServerClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: 'Unauthorized' };
+
+    const { data: callerProfile } = await admin
+      .from('profiles').select('org_id').eq('id', user.id).single();
+    if (!callerProfile?.org_id) return { success: false, error: 'Organization not found' };
+
+    const { data: hospRole } = await admin
+      .from('user_hospital_roles').select('hospital_id').eq('user_id', employeeId).limit(1).single();
+
+    const { error } = await admin.from('attendance_records').upsert({
+      org_id:        callerProfile.org_id,
+      employee_id:   employeeId,
+      hospital_id:   hospRole?.hospital_id ?? null,
+      date:          today,
+      status,
+      check_in_time: checkInTime ?? (status === 'present' ? new Date().toISOString() : null),
+      recorded_by:   user.id,
+      updated_at:    new Date().toISOString(),
+    }, { onConflict: 'employee_id,date' });
+
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : 'Error' };
+  }
+}
+
+// ── Full attendance record update (status + times + notes + any date) ─────────
+
+export async function updateAttendanceRecord(input: {
+  employeeId: string;
+  date: string;
+  status: AttendanceStatus;
+  checkInTime: string | null;
+  checkOutTime: string | null;
+  notes: string | null;
+}): Promise<{ success: boolean; error?: string }> {
+  const admin = createSupabaseAdminClient();
+  try {
+    const supabase = await createSupabaseServerClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { success: false, error: 'Unauthorized' };
+
+    const { data: callerProfile } = await admin.from('profiles').select('org_id').eq('id', user.id).single();
+    if (!callerProfile?.org_id) return { success: false, error: 'Organization not found' };
+
+    const { data: hospRole } = await admin.from('user_hospital_roles').select('hospital_id').eq('user_id', input.employeeId).limit(1).single();
+
+    const { error } = await admin.from('attendance_records').upsert({
+      org_id:         callerProfile.org_id,
+      employee_id:    input.employeeId,
+      hospital_id:    hospRole?.hospital_id ?? null,
+      date:           input.date,
+      status:         input.status,
+      check_in_time:  input.checkInTime,
+      check_out_time: input.checkOutTime,
+      notes:          input.notes,
+      recorded_by:    user.id,
+      updated_at:     new Date().toISOString(),
+    }, { onConflict: 'employee_id,date' });
+
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : 'Error' };
+  }
+}
+
+// ── Monthly attendance summary for one employee ────────────────────────────────
+
+export interface MonthlyAttendanceSummary {
+  employeeId: string;
+  employeeName: string;
+  role: string;
+  hospitalName: string;
+  hospitalColor: string | null;
+  presentDays: number;
+  lateDays: number;
+  absentDays: number;
+  leaveDays: number;
+  remoteDays: number;
+  totalDays: number;
+  attendanceRate: number;
+  records: Array<{ date: string; status: AttendanceStatus; check_in_time: string | null; check_out_time: string | null; notes: string | null }>;
+}
+
+export async function getMonthlyAttendance(year: number, month: number): Promise<{
+  summaries: MonthlyAttendanceSummary[];
+  hospitals: Array<{ id: string; name: string; color: string | null }>;
+  error?: string;
+}> {
+  const admin = createSupabaseAdminClient();
+  try {
+    const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
+    const endDate   = new Date(year, month, 0).toISOString().split('T')[0]; // last day of month
+
+    const [hospRes, rolesRes] = await Promise.all([
+      admin.from('hospitals').select('id,name,color').order('name'),
+      admin.from('user_hospital_roles').select('user_id, role, hospital_id'),
+    ]);
+
+    const profileIds = [...new Set((rolesRes.data ?? []).map((r: { user_id: string }) => r.user_id))];
+    const profilesRes = profileIds.length > 0
+      ? await admin.from('profiles').select('id, first_name, last_name, is_active').in('id', profileIds).neq('is_active', false)
+      : { data: [] as { id: string; first_name: string | null; last_name: string | null; is_active: boolean | null }[] };
+
+    const { data: attData } = await admin
+      .from('attendance_records')
+      .select('employee_id, date, status, check_in_time, check_out_time, notes')
+      .gte('date', startDate)
+      .lte('date', endDate);
+
+    const hospitals  = (hospRes.data ?? []).map(h => ({ id: h.id, name: h.name, color: h.color ?? null }));
+    const hospMap    = new Map(hospitals.map(h => [h.id, h]));
+    const profileMap = new Map((profilesRes.data ?? []).map(p => [p.id, p]));
+
+    // Group records by employee
+    const recsByEmp = new Map<string, typeof attData>();
+    for (const rec of (attData ?? [])) {
+      if (!recsByEmp.has(rec.employee_id)) recsByEmp.set(rec.employee_id, []);
+      recsByEmp.get(rec.employee_id)!.push(rec);
+    }
+
+    const seen = new Set<string>();
+    const summaries: MonthlyAttendanceSummary[] = [];
+    for (const r of (rolesRes.data ?? [])) {
+      if (seen.has(r.user_id) || !profileMap.has(r.user_id)) continue;
+      seen.add(r.user_id);
+      const profile = profileMap.get(r.user_id)!;
+      const hosp    = hospMap.get(r.hospital_id);
+      if (!hosp) continue;
+      const records = (recsByEmp.get(r.user_id) ?? []).map(rec => ({
+        date:           rec.date as string,
+        status:         rec.status as AttendanceStatus,
+        check_in_time:  rec.check_in_time as string | null,
+        check_out_time: rec.check_out_time as string | null,
+        notes:          (rec as { notes?: string | null }).notes ?? null,
+      }));
+      const counts = { present: 0, late: 0, absent: 0, on_leave: 0, remote: 0 };
+      for (const rec of records) counts[rec.status] = (counts[rec.status] ?? 0) + 1;
+      const totalDays = records.length;
+      summaries.push({
+        employeeId:     r.user_id,
+        employeeName:   [profile.first_name, profile.last_name].filter(Boolean).join(' ') || 'Unknown',
+        role:           r.role ?? 'staff',
+        hospitalName:   hosp.name,
+        hospitalColor:  hosp.color ?? null,
+        presentDays:    counts.present,
+        lateDays:       counts.late,
+        absentDays:     counts.absent,
+        leaveDays:      counts.on_leave,
+        remoteDays:     counts.remote,
+        totalDays,
+        attendanceRate: totalDays > 0 ? Math.round(((counts.present + counts.late + counts.remote) / totalDays) * 100) : 0,
+        records,
+      });
+    }
+
+    return { summaries, hospitals };
+  } catch (err) {
+    return { summaries: [], hospitals: [], error: err instanceof Error ? err.message : 'Error' };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Legacy: Get employees with hospital info for Attendance section (kept for compat)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface AttendanceEmployee {
+  id: string;
+  name: string;
+  role: string;
+  department: string | null;
+  avatar_url: string | null;
+  hospital_id: string;
+  hospital_name: string;
+  hospital_color: string | null;
+}
+
+export async function getEmployeesForAttendance(): Promise<{ employees: AttendanceEmployee[]; hospitals: Array<{ id: string; name: string; color: string | null }>; error?: string }> {
+  const admin = createSupabaseAdminClient();
+  try {
+    const [hospRes, rolesRes] = await Promise.all([
+      admin.from('hospitals').select('id,name,color').order('name'),
+      admin.from('user_hospital_roles')
+        .select('user_id, role, hospital_id, profiles!inner(first_name, last_name, department, avatar_url), hospitals!inner(id, name, color)')
+        .order('hospital_id'),
+    ]);
+
+    const hospitals = (hospRes.data ?? []).map(h => ({ id: h.id, name: h.name, color: h.color ?? null }));
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const employees: AttendanceEmployee[] = (rolesRes.data ?? []).map((r: any) => ({
+      id:             r.user_id,
+      name:           [r.profiles?.first_name, r.profiles?.last_name].filter(Boolean).join(' ') || 'Unknown',
+      role:           r.role ?? 'staff',
+      department:     r.profiles?.department ?? null,
+      avatar_url:     r.profiles?.avatar_url ?? null,
+      hospital_id:    r.hospital_id,
+      hospital_name:  r.hospitals?.name ?? '—',
+      hospital_color: r.hospitals?.color ?? null,
+    }));
+
+    // Deduplicate by user_id (take first role per user)
+    const seen = new Set<string>();
+    const unique = employees.filter(e => { if (seen.has(e.id)) return false; seen.add(e.id); return true; });
+
+    return { employees: unique, hospitals };
+  } catch (err) {
+    return { employees: [], hospitals: [], error: err instanceof Error ? err.message : 'Unknown error' };
+  }
+}

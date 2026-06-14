@@ -52,6 +52,10 @@ export type Permission =
   | 'documents:view_own' | 'documents:view_all' | 'documents:verify'
   // HR
   | 'hr:view' | 'hr:manage'
+  // Attendance
+  | 'attendance:view' | 'attendance:manage'
+  // Hiring & Recruitment
+  | 'hiring:view' | 'hiring:manage'
   // Tasks
   | 'tasks:view' | 'tasks:create' | 'tasks:edit' | 'tasks:delete';
 
@@ -80,6 +84,8 @@ const ALL_PERMISSIONS: Permission[] = [
   'analytics:view_own','analytics:view_hosp','analytics:view_all',
   'documents:view_own','documents:view_all','documents:verify',
   'hr:view','hr:manage',
+  'attendance:view','attendance:manage',
+  'hiring:view','hiring:manage',
   'tasks:view','tasks:create','tasks:edit','tasks:delete',
 ];
 
@@ -109,6 +115,8 @@ export const ROLE_PERMISSIONS: Record<AppRole, Permission[]> = {
     'analytics:view_own','analytics:view_hosp',
     'documents:view_own','documents:view_all','documents:verify',
     'hr:view','hr:manage',
+    'attendance:view','attendance:manage',
+    'hiring:view','hiring:manage',
     'tasks:view','tasks:create','tasks:edit','tasks:delete',
   ],
 
@@ -131,17 +139,20 @@ export const ROLE_PERMISSIONS: Record<AppRole, Permission[]> = {
   hr: [
     'users:view','users:create','users:edit',
     'departments:view',
-    'requests:view_own','requests:create','requests:approve',
+    'hospitals:view',
+    'requests:view_own','requests:view_hosp','requests:create','requests:approve',
     'calendar:view','calendar:create',
     'knowledge_base:view',
     'training:view','training:create','training:edit',
     'onboarding:view','onboarding:create','onboarding:manage',
-    'ai:query_own',
+    'ai:query_own','ai:query_hosp',
     'communication:view','communication:create',
-    'analytics:view_own',
+    'analytics:view_own','analytics:view_hosp',
     'documents:view_own','documents:view_all','documents:verify',
     'hr:view','hr:manage',
-    'tasks:view','tasks:create','tasks:edit',
+    'attendance:view','attendance:manage',
+    'hiring:view','hiring:manage',
+    'tasks:view','tasks:create','tasks:edit','tasks:delete',
   ],
 
   doctor: [
@@ -338,14 +349,17 @@ export const ALL_NAV_ITEMS: NavItem[] = [
   { label: 'My Requests',         href: '/requests-portal', iconKey: 'Inbox',           section: 'core' },
 
   // Role-gated core
-  { label: 'Projects',            href: '/projects',        iconKey: 'FolderOpen',      section: 'core', permission: 'projects:view' },
-  { label: 'Analytics & KPI',     href: '/kpi',             iconKey: 'BarChart3',       section: 'core', permission: 'analytics:view_hosp' },
-  { label: 'Hospital Hub',        href: '/hospital-hub',    iconKey: 'Building2',       section: 'core', permission: 'hospital_hub:view' },
-  { label: 'Employee Onboarding', href: '/onboarding',      iconKey: 'UserPlus',        section: 'core', permission: 'onboarding:view' },
+  { label: 'Projects',            href: '/projects',        iconKey: 'FolderOpen',      section: 'core',  permission: 'projects:view' },
+  { label: 'Analytics & KPI',     href: '/kpi',             iconKey: 'BarChart3',       section: 'core',  permission: 'analytics:view_hosp' },
+  { label: 'Hospital Hub',        href: '/hospital-hub',    iconKey: 'Building2',       section: 'core',  permission: 'hospital_hub:view' },
 
-  // HR section
-  { label: 'Employees',           href: '/hr',              iconKey: 'Users',           section: 'hr',   permission: 'hr:view' },
-  { label: 'Documents',           href: '/documents',       iconKey: 'FileText',        section: 'hr',   permission: 'documents:verify' },
+  // HR section — People & Workforce management
+  { label: 'Employee Directory',  href: '/hr',              iconKey: 'Users',           section: 'hr',    permission: 'hr:view' },
+  { label: 'Onboarding',          href: '/onboarding',      iconKey: 'UserPlus',        section: 'hr',    permission: 'onboarding:view' },
+  { label: 'Attendance & Time',   href: '/attendance',      iconKey: 'ClipboardCheck',  section: 'hr',    permission: 'attendance:view' },
+  { label: 'Hiring & Recruitment',href: '/hiring',          iconKey: 'Briefcase',       section: 'hr',    permission: 'hiring:view' },
+  { label: 'Documents',           href: '/documents',       iconKey: 'FileText',        section: 'hr',    permission: 'documents:verify' },
+  { label: 'Schedule Requests',   href: '/schedule-requests', iconKey: 'CalendarCheck', section: 'hr',    permission: 'requests:approve' },
 
   // Admin section
   { label: 'Approval Center',     href: '/approvals',       iconKey: 'CheckSquare',     section: 'admin', permission: 'requests:approve', badge: 'pendingRequests' },

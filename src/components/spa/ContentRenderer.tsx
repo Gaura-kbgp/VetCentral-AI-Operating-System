@@ -22,6 +22,8 @@ import { HRSection               } from '@/components/sections/HRSection';
 import { DocumentsSection        } from '@/components/sections/DocumentsSection';
 import { ApprovalsSection        } from '@/components/sections/ApprovalsSection';
 import { ScheduleRequestsSection } from '@/components/sections/ScheduleRequestsSection';
+import { AttendanceSection       } from '@/components/sections/AttendanceSection';
+import { HiringSection           } from '@/components/sections/HiringSection';
 import { AdminUsersSection       } from '@/components/sections/AdminUsersSection';
 import { AdminRolesSection       } from '@/components/sections/AdminRolesSection';
 import { AdminDepartmentsSection } from '@/components/sections/AdminDepartmentsSection';
@@ -47,17 +49,19 @@ const SECTION_REGISTRY: Array<{ key: SectionKey; Component: SectionComponentType
   { key: 'calendar',             Component: CalendarSection         },
   { key: 'tasks',                Component: TasksSection            },
   { key: 'announcements',         Component: AnnouncementsSection    },
-  { key: 'messages',              Component: MessagesSection         },
+  { key: 'messages',              Component: MessagesSection,          fullHeight: true },
   { key: 'requests-portal',       Component: RequestsPortalSection   },
   { key: 'workflows',            Component: WorkflowsSection        },
   { key: 'projects',             Component: ProjectsSection         },
   { key: 'analytics',            Component: AnalyticsSection        },
   { key: 'hospital-hub',         Component: HospitalHubSection      },
-  { key: 'onboarding',           Component: OnboardingSection       },
+  { key: 'onboarding',           Component: OnboardingSection                        },
   { key: 'hr',                   Component: HRSection               },
   { key: 'documents',            Component: DocumentsSection        },
   { key: 'approvals',            Component: ApprovalsSection        },
   { key: 'schedule-requests',    Component: ScheduleRequestsSection },
+  { key: 'attendance',           Component: AttendanceSection       },
+  { key: 'hiring',               Component: HiringSection           },
   { key: 'admin-users',          Component: AdminUsersSection       },
   { key: 'admin-roles',          Component: AdminRolesSection       },
   { key: 'admin-departments',    Component: AdminDepartmentsSection },

@@ -6,7 +6,7 @@ import {
   GraduationCap, FolderOpen, Building2, Sparkles,
   UserPlus, Inbox, Settings, ClipboardList, Users, UserCog,
   CheckSquare, Shield, FileText, AlertCircle, BarChart3, Activity,
-  Megaphone, Hash,
+  Megaphone, Hash, ClipboardCheck, Briefcase, CalendarCheck,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getVisibleNavItems, ROLE_META, type NavItem } from '@/lib/permissions';
@@ -22,6 +22,7 @@ const ICON_MAP: Record<string, React.ElementType> = {
   UserPlus, Inbox, Settings, ClipboardList, Users, UserCog,
   CheckSquare, CheckSquare2: CheckSquare, Shield, FileText, AlertCircle,
   BarChart3, Activity, Megaphone, Hash,
+  ClipboardCheck, Briefcase, CalendarCheck,
 };
 
 interface NavLinkProps {
@@ -180,7 +181,7 @@ function AppSidebarInner({ role, pendingRequestCount = 0 }: Props) {
 
         {hrItems.length > 0 && (
           <>
-            <SectionLabel label="HR" />
+            <SectionLabel label="People & HR" />
             {hrItems.map(item => (
               <NavLink
                 key={item.href}

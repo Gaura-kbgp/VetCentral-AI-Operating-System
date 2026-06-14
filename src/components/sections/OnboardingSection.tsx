@@ -1,40 +1,64 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { UserPlus } from 'lucide-react';
 import { PageHeader } from '@/components/ui/page-header';
-import OnboardingShell from '@/components/onboarding/onboarding-shell';
-import { getOnboardingShellData } from '@/lib/actions/onboarding-steps';
+import { HRPipeline } from '@/components/onboarding/hr-pipeline';
+import { EmployeeDetailView } from '@/components/onboarding/employee-detail-view';
+import { getHRPipelineData } from '@/lib/actions/onboarding-wizard';
 import { BannerCardGridSkeleton } from './skeletons';
-import type { ShellRecord } from '@/lib/actions/onboarding-steps';
+import type { PipelineEmployee } from '@/lib/actions/onboarding-wizard-types';
 import type { SectionProps } from './types';
 
-export function OnboardingSection({ userId, role }: SectionProps) {
-  const [data, setData] = useState<{ ongoing: ShellRecord[]; onboarded: ShellRecord[] } | null>(null);
+type HospitalItem = { name: string; color: string | null };
+
+export function OnboardingSection({ userId }: SectionProps) {
+  const [employees, setEmployees]         = useState<PipelineEmployee[] | null>(null);
+  const [hospitals, setHospitals]         = useState<HospitalItem[]>([]);
+  const [selectedEmpId, setSelectedEmpId] = useState<string | null>(null);
+
+  const loadData = useCallback(() => {
+    getHRPipelineData().then(res => {
+      setEmployees(res.employees);
+      if (res.hospitals.length > 0) setHospitals(res.hospitals);
+    });
+  }, []);
 
   useEffect(() => {
     let alive = true;
-    getOnboardingShellData().then(res => {
+    getHRPipelineData().then(res => {
       if (!alive) return;
-      setData({ ongoing: res.ongoing, onboarded: res.onboarded });
+      setEmployees(res.employees);
+      if (res.hospitals.length > 0) setHospitals(res.hospitals);
     });
     return () => { alive = false; };
   }, [userId]);
 
+  if (selectedEmpId) {
+    return (
+      <EmployeeDetailView
+        employeeId={selectedEmpId}
+        onBack={() => setSelectedEmpId(null)}
+        onRefreshList={loadData}
+      />
+    );
+  }
+
   return (
-    <div className="flex flex-col h-full min-h-0 px-6 py-6">
+    <div className="flex flex-col gap-6">
       <PageHeader
         title="Employee Onboarding"
-        description="Track and manage the onboarding process for new employees"
-        color="green"
+        description="Track and manage the onboarding journey for all new team members"
+        color="navy"
         variant="banner"
         icon={<UserPlus className="h-7 w-7" />}
       />
-      {data ? (
-        <OnboardingShell
-          initialOngoing={data.ongoing}
-          initialOnboarded={data.onboarded}
-          currentUserRole={role}
+
+      {employees !== null ? (
+        <HRPipeline
+          initialEmployees={employees}
+          initialHospitals={hospitals}
+          onViewEmployee={setSelectedEmpId}
         />
       ) : (
         <BannerCardGridSkeleton />

@@ -3,7 +3,8 @@ export type SectionKey =
   | 'tasks' | 'announcements' | 'messages' | 'requests-portal'
   | 'workflows' | 'projects' | 'analytics'
   | 'hospital-hub' | 'onboarding' | 'hr' | 'documents' | 'approvals'
-  | 'schedule-requests' | 'admin-users' | 'admin-roles' | 'admin-departments'
+  | 'schedule-requests' | 'attendance' | 'hiring'
+  | 'admin-users' | 'admin-roles' | 'admin-departments'
   | 'admin-hospitals' | 'admin-integrations' | 'admin-audit-logs' | 'admin-settings'
   | 'notifications' | 'profile' | 'help' | 'settings-preferences'
   | 'settings-security' | 'settings-ai'
@@ -29,6 +30,8 @@ export const HREF_TO_SECTION: Record<string, SectionKey> = {
   '/documents':            'documents',
   '/approvals':            'approvals',
   '/schedule-requests':    'schedule-requests',
+  '/attendance':           'attendance',
+  '/hiring':               'hiring',
   '/admin/users':          'admin-users',
   '/admin/roles':          'admin-roles',
   '/admin/departments':    'admin-departments',
