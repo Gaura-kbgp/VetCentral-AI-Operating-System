@@ -1,5 +1,23 @@
 'use client';
 
+// Web Speech API types not in default TS lib — declare minimal shapes needed
+type SpeechRecognitionEvent = Event & { results: SpeechRecognitionResultList };
+type SpeechRecognitionResultList = { 0: SpeechRecognitionResult; length: number };
+type SpeechRecognitionResult = { 0: SpeechRecognitionAlternative; length: number };
+type SpeechRecognitionAlternative = { transcript: string; confidence: number };
+interface ISpeechRecognition extends EventTarget {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  onresult: ((e: SpeechRecognitionEvent) => void) | null;
+  onerror:  ((e: Event) => void) | null;
+  onend:    (() => void) | null;
+  start():  void;
+  stop():   void;
+  abort():  void;
+}
+type SpeechRecognitionCtor = new () => ISpeechRecognition;
+
 import { useState, useTransition, useRef, useEffect, useCallback } from 'react';
 import {
   Check, ChevronRight, ChevronLeft, User, FileText, Phone,
@@ -1097,8 +1115,8 @@ function useVoiceAssistant(opts: {
     supported:   typeof window !== 'undefined' && ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window),
   });
 
-  const recognitionRef = useRef<SpeechRecognition | null>(null);
-  const synthRef       = useRef<SpeechSynthesis | null>(null);
+  const recognitionRef = useRef<ISpeechRecognition | null>(null);
+  const synthRef       = useRef<typeof window['speechSynthesis'] | null>(null);
 
   // Speak text via Web Speech API
   const speak = useCallback((text: string) => {
@@ -1152,8 +1170,10 @@ function useVoiceAssistant(opts: {
   // Start/stop listening
   const startListening = useCallback(() => {
     if (!state.supported) return;
-    const SpeechRecognitionCtor = (window as typeof window & { webkitSpeechRecognition?: typeof SpeechRecognition }).webkitSpeechRecognition ?? window.SpeechRecognition;
-    const recognition = new SpeechRecognitionCtor();
+    const w = window as typeof window & { webkitSpeechRecognition?: SpeechRecognitionCtor; SpeechRecognition?: SpeechRecognitionCtor };
+    const Ctor = w.webkitSpeechRecognition ?? w.SpeechRecognition;
+    if (!Ctor) return;
+    const recognition = new Ctor();
     recognition.continuous     = false;
     recognition.interimResults = false;
     recognition.lang           = 'en-US';
